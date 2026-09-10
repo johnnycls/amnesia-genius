@@ -1,24 +1,24 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "amnesia-genius"
-version = "0.4.0"
-description = "A minimal self-directed agent that runs bash commands."
+name = "amnesia-agent-cli"
+version = "0.5.0"
+description = "Terminal frontend for amnesia-agent-kernel."
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 requires-python = ">=3.10,<3.15"
-dependencies = ["litellm>=1.98,<2"]
+dependencies = ["amnesia-agent-kernel>=0.5,<0.6"]
 
 [project.scripts]
-amnesia-genius = "amnesia_genius.cli:main"
+amnesia-agent = "amnesia_agent_cli.cli:main"
 
 [tool.setuptools]
-packages = ["amnesia_genius"]
+packages = ["amnesia_agent_cli"]
 
 [tool.setuptools.package-data]
-"amnesia_genius" = ["data/*"]
+"amnesia_agent_cli" = ["data/*"]
 
 [tool.ruff]
 target-version = "py310"
@@ -28,7 +28,7 @@ line-length = 100
 select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 
 [tool.mypy]
-files = ["amnesia_genius"]
+files = ["amnesia_agent_cli"]
 disallow_untyped_defs = true
 check_untyped_defs = true
 warn_return_any = true

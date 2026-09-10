@@ -4,9 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import amnesia_genius.agent as agent
-from amnesia_genius import config
-from amnesia_genius.errors import AgentError
+from amnesia_agent_cli.config import ConfigStore
+from amnesia_agent_kernel import AgentError
 
 
 class ConfigTests(unittest.TestCase):
@@ -21,19 +20,18 @@ class ConfigTests(unittest.TestCase):
     def test_model_must_be_a_non_empty_string(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             self.write_config(directory, model=42)
-            with patch.object(config, "CONFIG_DIR", directory):
-                with self.assertRaises(AgentError):
-                    config.load_config()
+            store = ConfigStore(directory)
+            with self.assertRaises(AgentError):
+                store.load()
 
-    def test_bash_tool_schema_is_checked(self) -> None:
+    def test_config_store_seeds_and_resets_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            Path(directory, "bash_tool.json").write_text(
-                json.dumps({"type": "function", "function": {"name": "bash"}}),
-                encoding="utf-8",
-            )
-            with patch.object(config, "CONFIG_DIR", directory):
-                with self.assertRaises(AgentError):
-                    config.load_bash_tool()
+            store = ConfigStore(directory)
+            store.setup()
+            self.assertTrue(store.path.exists())
+            store.path.write_text('{"model":"changed"}', encoding="utf-8")
+            store.reset()
+            self.assertIn('"model": ""', store.path.read_text(encoding="utf-8"))
 
     def test_provider_params_satisfy_missing_env_keys(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -47,17 +45,12 @@ class ConfigTests(unittest.TestCase):
                     "aws_region_name": "us-east-1",
                 },
             )
-            with patch.object(config, "CONFIG_DIR", directory):
-                cfg = config.load_config()
-            with patch.object(
-                agent.litellm,
-                "validate_environment",
-                return_value={
-                    "keys_in_environment": False,
-                    "missing_keys": ["AWS_ACCESS_KEY_ID"],
-                },
-            ):
-                agent.validate_llm(cfg)
+            with patch(
+                "amnesia_agent_cli.config.validate_runtime_config"
+            ) as validate:
+                config = ConfigStore(directory).load()
+            validate.assert_called_once_with(config)
+            self.assertEqual(config.model, "bedrock/us.anthropic.claude-sonnet-4-5")
 
 
 if __name__ == "__main__":

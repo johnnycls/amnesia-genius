@@ -6,7 +6,7 @@ import re
 import sys
 from typing import Any
 
-from amnesia_genius.events import AssistantMessage, Delta, ToolResult
+from amnesia_agent_kernel.events import AssistantMessage, Delta, ToolResult
 
 MAX_TOOL_LINES: int = 4
 

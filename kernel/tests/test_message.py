@@ -1,10 +1,8 @@
 import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
-from amnesia_genius import config
-from amnesia_genius.message import build_messages, truncate_middle
+from amnesia_agent_kernel.message import build_messages, truncate_middle
+from amnesia_agent_kernel.workspace import Workspace
 
 
 class MessageTests(unittest.TestCase):
@@ -22,14 +20,14 @@ class MessageTests(unittest.TestCase):
 
     def test_user_content_is_not_sliced_but_other_content_is(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            Path(directory, "memory.md").write_text("memory", encoding="utf-8")
-            with patch.object(config, "CONFIG_DIR", directory):
-                messages = build_messages(
-                    "prompt",
-                    "0123456789",
-                    [{"role": "assistant", "content": "abcdefghij"}],
-                    6,
-                )
+            workspace = Workspace(directory)
+            messages = build_messages(
+                "prompt",
+                "0123456789",
+                [{"role": "assistant", "content": "abcdefghij"}],
+                6,
+                workspace,
+            )
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[1]["role"], "user")
         self.assertEqual(messages[1]["content"], "0123456789")

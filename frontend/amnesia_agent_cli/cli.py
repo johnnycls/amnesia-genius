@@ -1,4 +1,4 @@
-"""Command-line entry point: one front-end over the kernel."""
+"""Command-line frontend for the amnesia agent kernel."""
 
 import argparse
 import asyncio
@@ -8,13 +8,14 @@ import sys
 from collections.abc import Callable
 from typing import TypeVar
 
-from amnesia_genius import display
-from amnesia_genius.errors import AgentError
-from amnesia_genius.kernel import Agent
+from amnesia_agent_kernel import Agent, AgentError
+
+from amnesia_agent_cli import display
+from amnesia_agent_cli.config import ConfigStore
 
 try:
     import readline  # noqa: F401 - enables up-arrow input history on POSIX
-except ImportError:  # platform dependent
+except ImportError:
     pass
 
 T = TypeVar("T")
@@ -43,7 +44,7 @@ def _load_or_edit(loader: Callable[[], T]) -> T:
         print(
             f"Error: {e}\n"
             f"Opening {e.path} to fix.\n"
-            "Re-run amnesia-genius after saving.",
+            "Re-run amnesia-agent after saving.",
             file=sys.stderr,
         )
         _open_in_editor(e.path)
@@ -59,43 +60,44 @@ async def _render_turn(
 
 
 def _run() -> None:
-    """Seed the workspace, then loop: read input, run the agent turn."""
-    agent = Agent()
-    agent.setup()
+    """Seed frontend and kernel state, then run the interactive loop."""
+    config_store = ConfigStore()
+    config_store.setup()
     renderer = display.TerminalRenderer()
     display.clear()
     while True:
-        _load_or_edit(agent.reload)
+        config = _load_or_edit(config_store.load)
         try:
             user_input: str = input("> ")
         except KeyboardInterrupt:
             print()
             continue
+        agent = Agent(config)
         try:
             asyncio.run(_render_turn(agent, user_input, renderer))
         except KeyboardInterrupt:
             renderer.reset()
             print()
-        except Exception as e:  # a failed turn returns to the prompt
+        except Exception as e:
             renderer.reset()
             print(f"Error: {e}", file=sys.stderr)
 
 
 def _version() -> str:
     try:
-        return importlib.metadata.version("amnesia-genius")
+        return importlib.metadata.version("amnesia-agent-cli")
     except importlib.metadata.PackageNotFoundError:
         return "unknown"
 
 
 def main() -> None:
-    """Console-script entry point that runs the agent loop with error handling."""
+    """Console-script entry point."""
     parser = argparse.ArgumentParser(
-        prog="amnesia-genius",
+        prog="amnesia-agent",
         description="A minimal self-directed agent that runs bash commands.",
     )
     parser.add_argument(
-        "--version", action="version", version=f"amnesia-genius {_version()}"
+        "--version", action="version", version=f"amnesia-agent {_version()}"
     )
     parser.parse_args()
     try:
@@ -105,7 +107,7 @@ def main() -> None:
     except AgentError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    except Exception as e:  # fail loudly but cleanly
+    except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 

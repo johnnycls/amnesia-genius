@@ -1,4 +1,4 @@
-"""Agent turn: request building, streaming, tool dispatch, and event emission."""
+"""LLM turn orchestration, streaming, and tool dispatch."""
 
 from collections.abc import AsyncIterator
 from typing import Any
@@ -6,19 +6,18 @@ from typing import Any
 import litellm
 from litellm import acompletion
 
-from amnesia_genius.config import Config, global_path
-from amnesia_genius.errors import AgentError
-from amnesia_genius.events import AssistantMessage, Delta, Event, ToolResult
-from amnesia_genius.history import Message, append_history
-from amnesia_genius.message import build_messages
-from amnesia_genius.tools import execute_tool_calls
+from amnesia_agent_kernel.errors import AgentError
+from amnesia_agent_kernel.events import AssistantMessage, Delta, Event, ToolResult
+from amnesia_agent_kernel.history import Message
+from amnesia_agent_kernel.message import build_messages
+from amnesia_agent_kernel.tools import BASH_TOOL, execute_tool_calls
+from amnesia_agent_kernel.types import RuntimeConfig
+from amnesia_agent_kernel.workspace import Workspace
 
 
-def _request_kwargs(config: Config, **extra: Any) -> dict[str, Any]:
-    """Build litellm kwargs, with explicit config values winning over provider_params."""
-    kwargs: dict[str, Any] = (
-        dict(config.provider_params) if config.provider_params else {}
-    )
+def _request_kwargs(config: RuntimeConfig, **extra: Any) -> dict[str, Any]:
+    """Build LiteLLM kwargs, with explicit request values winning."""
+    kwargs: dict[str, Any] = dict(config.provider_params) if config.provider_params else {}
     kwargs.update(extra)
     kwargs["model"] = config.model
     if config.api_key is not None:
@@ -29,7 +28,7 @@ def _request_kwargs(config: Config, **extra: Any) -> dict[str, Any]:
 
 
 def _assistant_message(parts: list[str], calls: dict[int, dict[str, Any]]) -> Message:
-    """Build the assistant message from streamed content parts and tool-call slots."""
+    """Build the assistant message from streamed content and tool-call slots."""
     message: Message = {"role": "assistant", "content": "".join(parts)}
     tool_calls = [
         {"id": slot["id"], "type": "function", "function": slot["function"]}
@@ -40,15 +39,12 @@ def _assistant_message(parts: list[str], calls: dict[int, dict[str, Any]]) -> Me
     return message
 
 
-def validate_llm(config: Config, config_dir: str | None = None) -> None:
-    """Cheap presence check; wrong keys fail loudly on the first real call."""
-    path: str = global_path("config.json", config_dir)
+def validate_runtime_config(config: RuntimeConfig) -> None:
+    """Perform LiteLLM's cheap environment check for a validated config."""
     try:
         result: dict[str, Any] = litellm.validate_environment(config.model)
     except Exception as e:
-        raise AgentError(
-            f"LLM config check failed: {type(e).__name__}: {e}", path=path
-        ) from e
+        raise AgentError(f"LLM config check failed: {type(e).__name__}: {e}") from e
     if (
         not result.get("keys_in_environment", True)
         and result.get("missing_keys")
@@ -57,36 +53,28 @@ def validate_llm(config: Config, config_dir: str | None = None) -> None:
     ):
         raise AgentError(
             f"LLM config check failed: set {' or '.join(result['missing_keys'])} "
-            "in the environment, or fill 'api_key' in config.json.",
-            path=path,
+            "in the environment, or provide credentials in the frontend config."
         )
 
 
 async def agent_turn(
-    config: Config,
-    bash_tool: dict[str, Any],
-    system_prompt: str,
+    config: RuntimeConfig,
+    workspace: Workspace,
     user_input: str,
-    config_dir: str | None = None,
 ) -> AsyncIterator[Event]:
-    """Run one user turn, yielding live events until the model stops calling tools.
-
-    The turn runs as the events are consumed; the user input and every
-    assistant/tool message are appended to history as they happen.
-    """
-    append_history({"role": "user", "content": user_input}, config_dir)
+    """Run one user turn until the model stops calling tools."""
+    workspace.append_history({"role": "user", "content": user_input})
     turn_messages: list[Message] = []
     while True:
         messages: list[Message] = build_messages(
-            system_prompt,
+            workspace.read_system_prompt(),
             user_input,
             turn_messages,
             config.max_context_message_chars,
-            config_dir,
+            workspace,
         )
         response: Any = await acompletion(
-            **_request_kwargs(config, messages=messages, tools=[bash_tool]),
-            stream=True,
+            **_request_kwargs(config, messages=messages, tools=[BASH_TOOL], stream=True)
         )
         parts: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
@@ -112,13 +100,13 @@ async def agent_turn(
                     if function.arguments:
                         slot["function"]["arguments"] += function.arguments
         message = _assistant_message(parts, calls)
-        append_history(message, config_dir)
+        workspace.append_history(message)
         yield AssistantMessage(message)
         if not message.get("tool_calls"):
             return
         turn_messages.append(message)
         tool_messages: list[Message] = await execute_tool_calls(message["tool_calls"])
         for tool_message in tool_messages:
-            append_history(tool_message, config_dir)
+            workspace.append_history(tool_message)
             yield ToolResult(tool_message)
         turn_messages.extend(tool_messages)

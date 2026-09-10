@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from amnesia_genius.tools import execute_tool_calls, run_bash
+from amnesia_agent_kernel.tools import execute_tool_calls, run_bash
 
 
 def python_command(source: str) -> str:
@@ -37,7 +37,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             await all_started.wait()
             return f"result-{call['id']}"
 
-        with patch("amnesia_genius.tools.run_tool_call", new=AsyncMock(side_effect=fake_run)):
+        with patch("amnesia_agent_kernel.tools.run_tool_call", new=AsyncMock(side_effect=fake_run)):
             messages = await asyncio.wait_for(execute_tool_calls(calls), timeout=1)
 
         self.assertEqual(set(observed), {"one", "two"})

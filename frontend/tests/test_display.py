@@ -2,8 +2,8 @@ import contextlib
 import io
 import unittest
 
-from amnesia_genius.display import TerminalRenderer, _print_tool, _tool_command
-from amnesia_genius.events import AssistantMessage, Delta, ToolResult
+from amnesia_agent_cli.display import TerminalRenderer, _print_tool, _tool_command
+from amnesia_agent_kernel.events import AssistantMessage, Delta, ToolResult
 
 
 def render(renderer: TerminalRenderer, event: object) -> str:

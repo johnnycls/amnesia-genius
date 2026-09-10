@@ -1,18 +1,12 @@
-"""Test package: stub litellm so the suite runs without the heavy dependency."""
+"""Kernel test package with a lightweight local LiteLLM stub."""
 
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
 
-def _stub_litellm() -> None:
-    """Provide a lightweight litellm stand-in so agent imports without the dep."""
-    if "litellm" in sys.modules:
-        return
+if "litellm" not in sys.modules:
     fake = ModuleType("litellm")
     fake.validate_environment = MagicMock(return_value={"keys_in_environment": True})
     fake.acompletion = MagicMock()
     sys.modules["litellm"] = fake
-
-
-_stub_litellm()

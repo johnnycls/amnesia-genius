@@ -9,7 +9,29 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
-from amnesia_genius.history import Message
+from amnesia_agent_kernel.history import Message
+
+BASH_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "bash",
+        "description": (
+            "Run a shell command and return its exit code plus combined stdout/stderr "
+            "as plain text. Use it for everything: file operations, running scripts, "
+            "API calls, and memory management."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to run.",
+                }
+            },
+            "required": ["command"],
+        },
+    },
+}
 
 
 def _process_options() -> dict[str, Any]:

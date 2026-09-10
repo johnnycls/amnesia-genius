@@ -3,8 +3,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from amnesia_genius import cli
-from amnesia_genius.errors import AgentError
+from amnesia_agent_cli import cli
+from amnesia_agent_kernel.errors import AgentError
 
 
 def _raise_with_path() -> None:

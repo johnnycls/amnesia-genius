@@ -6,10 +6,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from amnesia_genius import config
-from amnesia_genius.agent import _assistant_message, _request_kwargs, agent_turn
-from amnesia_genius.config import Config
-from amnesia_genius.events import AssistantMessage, Delta, ToolResult
+from amnesia_agent_kernel.agent import _assistant_message, _request_kwargs, agent_turn
+from amnesia_agent_kernel.events import AssistantMessage, Delta, ToolResult
+from amnesia_agent_kernel.types import RuntimeConfig
+from amnesia_agent_kernel.workspace import Workspace
 
 
 def chunk(content: str | None = None, tool_calls: list[Any] | None = None) -> Any:
@@ -32,8 +32,8 @@ async def stream(*chunks: Any) -> Any:
         yield item
 
 
-def make_config() -> Config:
-    return Config(
+def make_config() -> RuntimeConfig:
+    return RuntimeConfig(
         model="openai/test",
         api_key=None,
         base_url=None,
@@ -53,9 +53,7 @@ class AssistantMessageTests(unittest.TestCase):
         self.assertEqual([call["id"] for call in message["tool_calls"]], ["c1", "c2"])
 
     def test_omits_tool_calls_key_when_absent(self) -> None:
-        self.assertEqual(
-            _assistant_message(["hi"], {}), {"role": "assistant", "content": "hi"}
-        )
+        self.assertEqual(_assistant_message(["hi"], {}), {"role": "assistant", "content": "hi"})
 
 
 class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
@@ -65,9 +63,7 @@ class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
             stream(
                 chunk(
                     tool_calls=[
-                        call_delta(
-                            0, call_id="c1", name="bash", arguments='{"command":"ls"}'
-                        )
+                        call_delta(0, call_id="c1", name="bash", arguments='{"command":"ls"}')
                     ]
                 )
             ),
@@ -83,29 +79,27 @@ class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
             "tool_call_id": "c1",
             "content": "out",
         }
-        config_value = make_config()
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(config, "CONFIG_DIR", directory):
-                Path(directory, "memory.md").write_text("memory", encoding="utf-8")
-                with (
-                    patch("amnesia_genius.agent.acompletion", new=fake_completion),
-                    patch(
-                        "amnesia_genius.agent.execute_tool_calls",
-                        new=AsyncMock(return_value=[tool_message]),
-                    ) as execute,
-                ):
-                    events = [
-                        event
-                        async for event in agent_turn(
-                            config_value, {}, "system prompt", "hi"
-                        )
-                    ]
-                history_roles = [
-                    json.loads(line)["role"]
-                    for line in Path(directory, "history.jsonl")
-                    .read_text(encoding="utf-8")
-                    .splitlines()
+            workspace = Workspace(directory)
+            with (
+                patch("amnesia_agent_kernel.agent.acompletion", new=fake_completion),
+                patch(
+                    "amnesia_agent_kernel.agent.execute_tool_calls",
+                    new=AsyncMock(return_value=[tool_message]),
+                ) as execute,
+            ):
+                events = [
+                    event
+                    async for event in agent_turn(
+                        make_config(), workspace, "hi"
+                    )
                 ]
+            history_roles = [
+                json.loads(line)["role"]
+                for line in Path(directory, "history.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
 
         self.assertEqual(
             [type(event) for event in events],
@@ -119,24 +113,23 @@ class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 2)
         first_messages = calls[0]["messages"]
         self.assertEqual(first_messages[0]["role"], "system")
-        self.assertIn("system prompt", first_messages[0]["content"])
-        self.assertIn("memory", first_messages[0]["content"])
+        self.assertIn("# System Prompt", first_messages[0]["content"])
+        self.assertIn("# Memory", first_messages[0]["content"])
         self.assertEqual(first_messages[1], {"role": "user", "content": "hi"})
         second_messages = calls[1]["messages"]
         self.assertEqual(len(second_messages), 4)
         self.assertEqual(second_messages[3], tool_message)
-
         self.assertEqual(history_roles, ["user", "assistant", "tool", "assistant"])
 
     async def test_request_kwargs_give_config_priority_over_provider_params(self) -> None:
-        config_value = Config(
+        config = RuntimeConfig(
             model="openai/test",
             api_key="key",
             base_url="https://example.com",
             provider_params={"model": "sneaky", "temperature": 0.5},
             max_context_message_chars=1000,
         )
-        kwargs = _request_kwargs(config_value, messages=[], tools=[])
+        kwargs = _request_kwargs(config, messages=[], tools=[])
         self.assertEqual(kwargs["model"], "openai/test")
         self.assertEqual(kwargs["api_key"], "key")
         self.assertEqual(kwargs["api_base"], "https://example.com")

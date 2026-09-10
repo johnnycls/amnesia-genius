@@ -13,9 +13,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install . ruff mypy
-      - run: ruff check .
-      - run: mypy
+      - run: pip install ./kernel
+      - run: pip install ./frontend ruff mypy
+      - working-directory: kernel
+        run: ruff check .
+      - working-directory: kernel
+        run: mypy
+      - working-directory: frontend
+        run: ruff check .
+      - working-directory: frontend
+        run: mypy
 
   test:
     strategy:
@@ -29,5 +36,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install .
-      - run: python -m unittest discover -t . -s tests -v
+      - run: pip install ./kernel
+      - run: pip install ./frontend
+      - working-directory: kernel
+        run: python -m unittest discover -t . -s tests -v
+      - working-directory: frontend
+        run: python -m unittest discover -t . -s tests -v
