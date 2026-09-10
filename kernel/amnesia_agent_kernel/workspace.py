@@ -320,10 +320,7 @@ class Workspace:
         directory = self._path(HISTORY_DIRECTORY)
         failures: list[WorkspaceError] = []
         with self._history_lock:
-            try:
-                dates = self.list_history()
-            except WorkspaceError:
-                raise
+            dates = self.list_history()
             for date in dates:
                 path = self._history_path(date)
                 try:

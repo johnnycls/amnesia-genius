@@ -5,7 +5,6 @@ from amnesia_agent_kernel.errors import (
     AgentError,
     ConfigError,
     ProviderError,
-    RenderError,
     ToolError,
     WorkspaceError,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "KernelSession",
     "ProviderConfig",
     "ProviderError",
-    "RenderError",
     "ToolError",
     "ToolResult",
     "WorkspaceError",

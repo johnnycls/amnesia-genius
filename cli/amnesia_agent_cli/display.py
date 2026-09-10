@@ -38,17 +38,6 @@ def _enable_ansi() -> None:
 _enable_ansi()
 
 
-def clear() -> None:
-    """Clear the terminal screen (only when attached to a real terminal)."""
-    try:
-        if not sys.stdout.isatty():
-            return
-        sys.stdout.write("\x1b[2J\x1b[1H")
-        sys.stdout.flush()
-    except OSError:
-        logger.debug("Could not clear terminal", exc_info=True)
-
-
 def _wrap(code: str, text: str) -> str:
     return f"\x1b[{code}m{text}\x1b[0m" if _ANSI_ENABLED else text
 

@@ -268,8 +268,6 @@ async def agent_turn(
                 response: Any = await acompletion(
                     **_request_kwargs(config, **request_kwargs)
                 )
-            except asyncio.CancelledError:
-                raise
             except Exception as e:
                 provider_error = _provider_error(e, config)
                 try:
@@ -319,8 +317,6 @@ async def agent_turn(
                         if arguments:
                             slot["function"]["arguments"] += arguments
                 message = _assistant_message(parts, calls)
-            except asyncio.CancelledError:
-                raise
             except Exception as e:
                 provider_error = _provider_error(e, config)
                 try:
@@ -344,8 +340,6 @@ async def agent_turn(
                     timeout_seconds=policy.command_timeout_seconds,
                     max_output_bytes=policy.max_command_output_bytes,
                 )
-            except asyncio.CancelledError:
-                raise
             except ToolError as tool_error:
                 _record_turn_error(workspace, tool_error)
                 raise

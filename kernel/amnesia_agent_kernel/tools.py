@@ -130,8 +130,7 @@ async def _collect_output(
         asyncio.create_task(_read_output(proc.stderr, "stderr", collector)),
     }
     waiter = asyncio.create_task(proc.wait())
-    pending: set[asyncio.Task[Any]] = set()
-    pending.update(readers)
+    pending: set[asyncio.Task[Any]] = set(readers)
     pending.add(waiter)
     try:
         while pending:

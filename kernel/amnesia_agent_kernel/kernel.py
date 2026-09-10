@@ -35,19 +35,12 @@ class KernelSession:
         self._workspace = Workspace(workspace_root)
         self._turn_lock = asyncio.Lock()
 
-    def turn(
+    async def turn(
         self,
         user_input: str,
         response_format: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[Event]:
         """Queue and stream one turn, optionally requesting structured output."""
-        return self._queued_turn(user_input, response_format)
-
-    async def _queued_turn(
-        self,
-        user_input: str,
-        response_format: Mapping[str, Any] | None,
-    ) -> AsyncIterator[Event]:
         async with self._turn_lock:
             async for event in agent_turn(
                 self.provider,

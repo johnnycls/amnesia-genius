@@ -70,14 +70,8 @@ async def _render_turn(
 
 def _run() -> None:
     """Seed CLI and kernel state, then run the interactive loop."""
-    try:
-        config_store = ConfigStore()
-        config_store.setup()
-    except AgentError as e:
-        report_error(e)
-        raise
+    config_store = ConfigStore()
     renderer = display.TerminalRenderer()
-    display.clear()
     while True:
         loaded = _load_or_edit(config_store.load)
         try:

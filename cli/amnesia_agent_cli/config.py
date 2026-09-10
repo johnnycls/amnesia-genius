@@ -1,7 +1,6 @@
 """Frontend-owned configuration storage and validation."""
 
 import json
-import math
 import os
 import shutil
 from dataclasses import dataclass
@@ -9,13 +8,18 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 
-from amnesia_agent_kernel import ConfigError, ExecutionPolicy, ProviderConfig
+from amnesia_agent_kernel import (
+    ConfigError,
+    ExecutionPolicy,
+    ProviderConfig,
+    validate_execution_policy,
+    validate_provider_config,
+)
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
 DEFAULT_CONFIG_DIR = Path.home() / ".amnesia-agent-cli"
 PACKAGED_CONFIG_RESOURCE = "amnesia_agent_cli/data/config.json"
-PROVIDER_PARAM_TYPES: tuple[type, ...] = (str, int, float, bool)
 ScalarValue = str | int | float | bool
 
 CONFIG_SCHEMA: dict[str, Any] = {
@@ -56,11 +60,8 @@ def _schema_error_message(error: ValidationError) -> str:
     return f"Invalid config.json at {location}: {error.message}"
 
 
-@dataclass(frozen=True)
 class ConfigStore:
     """Persistent CLI configuration, separate from the kernel workspace."""
-
-    root: Path = DEFAULT_CONFIG_DIR
 
     def __init__(self, root: str | os.PathLike[str] | None = None) -> None:
         if root is not None and (
@@ -75,7 +76,7 @@ class ConfigStore:
             )
         except (OSError, TypeError, ValueError) as e:
             raise ConfigError(f"Invalid config root {root!r}: {e}") from e
-        object.__setattr__(self, "root", resolved)
+        self.root = resolved
 
     @property
     def path(self) -> Path:
@@ -128,76 +129,33 @@ class ConfigStore:
         except SchemaError as e:
             raise ConfigError(f"Invalid internal config schema: {e}", path=str(self.path)) from e
 
-        if not isinstance(raw_value, dict):
-            raise ConfigError("config.json must contain a JSON object.", path=str(self.path))
-        raw: dict[str, Any] = raw_value
-        model = self._required_string(raw["model"], "model")
+        raw: dict[str, Any] = cast(dict[str, Any], raw_value)
+        model = cast(str, raw["model"])
         if not model.strip():
             raise ConfigError("'model' must be a non-empty string.", path=str(self.path))
         provider = ProviderConfig(
             model=model,
-            api_key=self._optional_string(raw.get("api_key"), "api_key"),
-            base_url=self._optional_string(raw.get("base_url"), "base_url"),
-            provider_params=self._load_provider_params(raw.get("provider_params")),
+            api_key=cast(str | None, raw.get("api_key")) or None,
+            base_url=cast(str | None, raw.get("base_url")) or None,
+            provider_params=cast(
+                dict[str, ScalarValue] | None,
+                raw.get("provider_params"),
+            ),
         )
         policy = ExecutionPolicy(
-            command_timeout_seconds=self._positive_number(
-                raw.get("command_timeout_seconds", 120.0), "command_timeout_seconds"
+            command_timeout_seconds=float(
+                cast(int | float, raw.get("command_timeout_seconds", 120.0))
             ),
-            max_command_output_bytes=self._positive_integer(
-                raw.get("max_command_output_bytes", 256 * 1024),
-                "max_command_output_bytes",
+            max_command_output_bytes=cast(
+                int, raw.get("max_command_output_bytes", 256 * 1024)
             ),
-            max_context_message_chars=self._positive_integer(
-                raw.get("max_context_message_chars", 1000),
-                "max_context_message_chars",
+            max_context_message_chars=cast(
+                int, raw.get("max_context_message_chars", 1000)
             ),
         )
+        try:
+            validate_provider_config(provider)
+            validate_execution_policy(policy)
+        except ConfigError as e:
+            raise ConfigError(str(e), path=str(self.path)) from e
         return LoadedConfig(provider=provider, policy=policy)
-
-    def _required_string(self, value: Any, key: str) -> str:
-        if isinstance(value, bool) or not isinstance(value, str):
-            raise ConfigError(f"'{key}' must be a non-empty string.", path=str(self.path))
-        return value
-
-    def _optional_string(self, value: Any, key: str) -> str | None:
-        if value is None or value == "":
-            return None
-        if isinstance(value, bool) or not isinstance(value, str):
-            raise ConfigError(f"'{key}' must be a string.", path=str(self.path))
-        return cast(str, value)
-
-    def _positive_integer(self, value: Any, key: str) -> int:
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ConfigError(f"'{key}' must be a positive integer.", path=str(self.path))
-        return cast(int, value)
-
-    def _positive_number(self, value: Any, key: str) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ConfigError(f"'{key}' must be a positive number.", path=str(self.path))
-        if not math.isfinite(value) or value <= 0:
-            raise ConfigError(f"'{key}' must be a finite positive number.", path=str(self.path))
-        return float(value)
-
-    def _load_provider_params(self, value: Any) -> dict[str, ScalarValue] | None:
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            raise ConfigError("'provider_params' must be a JSON object.", path=str(self.path))
-        params: dict[str, ScalarValue] = {}
-        for name, param in value.items():
-            if not isinstance(name, str) or not name:
-                raise ConfigError(
-                    "'provider_params' keys must be non-empty strings.", path=str(self.path)
-                )
-            if not isinstance(param, PROVIDER_PARAM_TYPES):
-                raise ConfigError(
-                    f"'provider_params.{name}' must be a string, number, or boolean.",
-                    path=str(self.path),
-                )
-            if isinstance(param, float) and not math.isfinite(param):
-                raise ConfigError(
-                    f"'provider_params.{name}' must be finite.", path=str(self.path)
-                )
-            params[name] = cast(ScalarValue, param)
-        return params

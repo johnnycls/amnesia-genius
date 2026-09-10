@@ -43,7 +43,3 @@ class ToolError(AgentError):
         super().__init__(message)
         self.tool = tool
         self.command = command
-
-
-class RenderError(AgentError):
-    """A terminal rendering operation failed."""
