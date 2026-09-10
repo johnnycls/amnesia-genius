@@ -223,8 +223,6 @@ async def run_bash(
             logger.error("Bash process cleanup failed after timeout", exc_info=True)
         await _close_pipes(proc)
         return _format_output(proc, collector, timed_out=True)
-    except asyncio.CancelledError:
-        raise
     except ToolError:
         raise
     except Exception as e:
@@ -269,7 +267,7 @@ async def run_tool_call(
         if not isinstance(function, dict) or function.get("name") != "bash":
             raise ToolError("unknown tool; expected 'bash'", tool="bash")
         command = _parse_command(function.get("arguments", ""))
-    except (AttributeError, json.JSONDecodeError, KeyError, TypeError, ToolError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError, ToolError) as e:
         return _tool_error_text(e)
     try:
         return await run_bash(command, timeout_seconds, max_output_bytes)

@@ -18,7 +18,7 @@ amnesia-agent
 ~/.amnesia-agent-cli/config.json
 ```
 
-It is separate from the kernel workspace. The store seeds missing configuration, validates the JSON schema and typed values,
+It is separate from the kernel workspace. The store seeds missing configuration and validates the JSON values,
 and returns a `LoadedConfig` containing `ProviderConfig` and `ExecutionPolicy`.
 The kernel performs LiteLLM preflight during `KernelSession` initialization:
 

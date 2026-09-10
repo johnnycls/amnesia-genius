@@ -291,8 +291,6 @@ class Workspace:
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
             temporary = None
-        except OSError:
-            raise
         finally:
             if temporary is not None:
                 try:

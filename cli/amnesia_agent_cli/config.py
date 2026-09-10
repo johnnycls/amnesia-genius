@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from amnesia_agent_kernel import (
     ConfigError,
@@ -15,32 +15,20 @@ from amnesia_agent_kernel import (
     validate_execution_policy,
     validate_provider_config,
 )
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError, ValidationError
 
 DEFAULT_CONFIG_DIR = Path.home() / ".amnesia-agent-cli"
 PACKAGED_CONFIG_RESOURCE = "amnesia_agent_cli/data/config.json"
-ScalarValue = str | int | float | bool
-
-CONFIG_SCHEMA: dict[str, Any] = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["model"],
-    "properties": {
-        "model": {"type": "string", "minLength": 1},
-        "api_key": {"type": ["string", "null"]},
-        "base_url": {"type": ["string", "null"]},
-        "provider_params": {
-            "type": "object",
-            "propertyNames": {"minLength": 1},
-            "additionalProperties": {"type": ["string", "number", "boolean"]},
-        },
-        "command_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
-        "max_command_output_bytes": {"type": "integer", "exclusiveMinimum": 0},
-        "max_context_message_chars": {"type": "integer", "exclusiveMinimum": 0},
-    },
-}
+CONFIG_KEYS = frozenset(
+    {
+        "model",
+        "api_key",
+        "base_url",
+        "provider_params",
+        "command_timeout_seconds",
+        "max_command_output_bytes",
+        "max_context_message_chars",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -55,9 +43,8 @@ def _packaged_config() -> Any:
     return files("amnesia_agent_cli").joinpath("data", "config.json")
 
 
-def _schema_error_message(error: ValidationError) -> str:
-    location = ".".join(str(part) for part in error.absolute_path) or "<root>"
-    return f"Invalid config.json at {location}: {error.message}"
+def _blank_as_none(value: Any) -> Any:
+    return None if value == "" else value
 
 
 class ConfigStore:
@@ -122,36 +109,26 @@ class ConfigStore:
         return self._parse(raw_value)
 
     def _parse(self, raw_value: Any) -> LoadedConfig:
-        try:
-            Draft202012Validator(CONFIG_SCHEMA).validate(raw_value)
-        except ValidationError as e:
-            raise ConfigError(_schema_error_message(e), path=str(self.path)) from e
-        except SchemaError as e:
-            raise ConfigError(f"Invalid internal config schema: {e}", path=str(self.path)) from e
-
-        raw: dict[str, Any] = cast(dict[str, Any], raw_value)
-        model = cast(str, raw["model"])
-        if not model.strip():
-            raise ConfigError("'model' must be a non-empty string.", path=str(self.path))
+        if not isinstance(raw_value, dict):
+            raise ConfigError("config.json must contain a JSON object.", path=str(self.path))
+        unknown = set(raw_value) - CONFIG_KEYS
+        if unknown:
+            name = next(iter(unknown))
+            raise ConfigError(
+                f"Invalid config.json at {name}: unexpected property",
+                path=str(self.path),
+            )
+        raw = raw_value
         provider = ProviderConfig(
-            model=model,
-            api_key=cast(str | None, raw.get("api_key")) or None,
-            base_url=cast(str | None, raw.get("base_url")) or None,
-            provider_params=cast(
-                dict[str, ScalarValue] | None,
-                raw.get("provider_params"),
-            ),
+            model=raw.get("model"),
+            api_key=_blank_as_none(raw.get("api_key")),
+            base_url=_blank_as_none(raw.get("base_url")),
+            provider_params=raw.get("provider_params"),
         )
         policy = ExecutionPolicy(
-            command_timeout_seconds=float(
-                cast(int | float, raw.get("command_timeout_seconds", 120.0))
-            ),
-            max_command_output_bytes=cast(
-                int, raw.get("max_command_output_bytes", 256 * 1024)
-            ),
-            max_context_message_chars=cast(
-                int, raw.get("max_context_message_chars", 1000)
-            ),
+            command_timeout_seconds=raw.get("command_timeout_seconds", 120.0),
+            max_command_output_bytes=raw.get("max_command_output_bytes", 256 * 1024),
+            max_context_message_chars=raw.get("max_context_message_chars", 1000),
         )
         try:
             validate_provider_config(provider)

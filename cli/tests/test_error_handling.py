@@ -10,7 +10,7 @@ from amnesia_agent_cli.config import ConfigStore
 
 
 class ConfigErrorTests(unittest.TestCase):
-    def test_unknown_top_level_key_has_schema_path(self) -> None:
+    def test_unknown_top_level_key_names_the_bad_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, "config.json").write_text(
                 json.dumps(
