@@ -1,7 +1,7 @@
 """Public configuration types for the kernel."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, TypeAlias
 
@@ -25,12 +25,7 @@ class ProviderConfig:
             if self.provider_params is not None
             else None
         )
-        return ProviderConfig(
-            model=self.model,
-            api_key=self.api_key,
-            base_url=self.base_url,
-            provider_params=params,
-        )
+        return replace(self, provider_params=params)
 
 
 @dataclass(frozen=True)
