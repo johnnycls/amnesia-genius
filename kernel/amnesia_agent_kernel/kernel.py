@@ -12,8 +12,7 @@ from amnesia_agent_kernel.agent import (
     validate_provider_environment,
 )
 from amnesia_agent_kernel.events import Event
-from amnesia_agent_kernel.history import Message
-from amnesia_agent_kernel.types import ExecutionPolicy, ProviderConfig
+from amnesia_agent_kernel.types import ExecutionPolicy, Message, ProviderConfig
 from amnesia_agent_kernel.workspace import Workspace
 
 

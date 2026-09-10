@@ -16,6 +16,3 @@ def report_error(
     message = f"{context}: {error}" if context else str(error)
     logger.error(message, exc_info=include_traceback)
     print(f"Error: {message}", file=sys.stderr)
-
-
-__all__ = ["report_error"]

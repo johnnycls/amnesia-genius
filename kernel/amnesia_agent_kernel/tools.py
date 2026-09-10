@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from amnesia_agent_kernel.errors import ToolError
-from amnesia_agent_kernel.history import Message
+from amnesia_agent_kernel.types import Message
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
 from typing import Any
 
 from amnesia_agent_kernel.errors import ConfigError, ProviderError
-from amnesia_agent_kernel.history import Message
+from amnesia_agent_kernel.types import Message
 from amnesia_agent_kernel.workspace import Workspace
 
 

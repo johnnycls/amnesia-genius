@@ -17,10 +17,9 @@ from amnesia_agent_kernel.errors import (
     WorkspaceError,
 )
 from amnesia_agent_kernel.events import AssistantMessage, Delta, Event, ToolResult
-from amnesia_agent_kernel.history import Message
 from amnesia_agent_kernel.message import build_messages
 from amnesia_agent_kernel.tools import BASH_TOOL, execute_tool_calls
-from amnesia_agent_kernel.types import ExecutionPolicy, ProviderConfig
+from amnesia_agent_kernel.types import ExecutionPolicy, Message, ProviderConfig
 from amnesia_agent_kernel.workspace import Workspace
 
 logger = logging.getLogger(__name__)

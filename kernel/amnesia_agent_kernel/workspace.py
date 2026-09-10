@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from amnesia_agent_kernel.errors import WorkspaceError
-from amnesia_agent_kernel.history import Message
+from amnesia_agent_kernel.types import Message
 
 DEFAULT_WORKSPACE = Path.home() / ".amnesia-agent"
 WORKSPACE_FILES: tuple[str, ...] = (
