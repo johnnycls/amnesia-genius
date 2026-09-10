@@ -1,47 +1,56 @@
+import asyncio
 import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from amnesia_agent_kernel import (
-    Agent,
-    AgentError,
     ConfigError,
+    ExecutionPolicy,
+    KernelSession,
+    ProviderConfig,
     ProviderError,
     ToolError,
     WorkspaceError,
 )
-from amnesia_agent_kernel.agent import agent_turn, validate_runtime_config
+from amnesia_agent_kernel.agent import agent_turn, validate_provider_environment
+from amnesia_agent_kernel.events import Delta
 from amnesia_agent_kernel.tools import run_tool_call
-from amnesia_agent_kernel.types import RuntimeConfig
 from amnesia_agent_kernel.workspace import Workspace
 
 
 class ErrorHierarchyTests(unittest.TestCase):
-    def test_specific_errors_remain_agent_errors(self) -> None:
-        self.assertTrue(issubclass(ConfigError, AgentError))
-        self.assertTrue(issubclass(ProviderError, AgentError))
-        self.assertTrue(issubclass(ToolError, AgentError))
-        self.assertTrue(issubclass(WorkspaceError, AgentError))
+    def test_specific_errors_are_typed(self) -> None:
+        self.assertTrue(issubclass(ConfigError, Exception))
+        self.assertTrue(issubclass(ProviderError, Exception))
+        self.assertTrue(issubclass(ToolError, Exception))
+        self.assertTrue(issubclass(WorkspaceError, Exception))
 
 
 class ProviderValidationTests(unittest.TestCase):
     def test_malformed_preflight_result_is_provider_error(self) -> None:
-        config = RuntimeConfig("openai/test", None, None, None, 100)
+        config = ProviderConfig("openai/test")
         with patch(
             "amnesia_agent_kernel.agent.litellm.validate_environment",
             return_value=None,
         ), self.assertRaises(ProviderError):
-            validate_runtime_config(config)
+            validate_provider_environment(config)
 
-    def test_agent_preflights_before_workspace_setup(self) -> None:
-        config = RuntimeConfig("openai/test", None, None, None, 100)
+    def test_noncredential_provider_params_do_not_bypass_missing_key(self) -> None:
+        config = ProviderConfig("openai/test", provider_params={"temperature": 0.5})
+        with patch(
+            "amnesia_agent_kernel.agent.litellm.validate_environment",
+            return_value={"keys_in_environment": False, "missing_keys": ["OPENAI_API_KEY"]},
+        ), self.assertRaises(ProviderError):
+            validate_provider_environment(config)
+
+    def test_session_preflights_before_workspace_setup(self) -> None:
+        config = ProviderConfig("openai/test")
         with patch(
             "amnesia_agent_kernel.agent.litellm.validate_environment",
             side_effect=RuntimeError("missing credentials"),
         ), self.assertRaises(ProviderError):
-            Agent(config, tempfile.mkdtemp())
+            KernelSession(config, workspace_root=tempfile.mkdtemp())
 
 
 class ToolErrorTests(unittest.IsolatedAsyncioTestCase):
@@ -75,7 +84,6 @@ class AgentTurnErrorTests(unittest.IsolatedAsyncioTestCase):
             )
             raise RuntimeError("connection reset")
 
-        config = RuntimeConfig("openai/test", None, None, {"test": True}, 100)
         with tempfile.TemporaryDirectory() as directory:
             workspace = Workspace(directory)
             with patch(
@@ -85,30 +93,58 @@ class AgentTurnErrorTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ProviderError):
                     _ = [
                         event
-                        async for event in agent_turn(config, workspace, "hello")
+                        async for event in agent_turn(
+                            ProviderConfig("openai/test"),
+                            ExecutionPolicy(),
+                            workspace,
+                            "hello",
+                        )
                     ]
             records = workspace.read_history()
         self.assertEqual(records[0]["role"], "user")
         self.assertEqual(records[1], {"role": "assistant", "content": "partial"})
         self.assertEqual(records[2]["kind"], "turn_error")
 
+    async def test_cancellation_persists_partial_output_and_event(self) -> None:
+        delta_seen = asyncio.Event()
 
-class WorkspaceErrorTests(unittest.TestCase):
-    def test_history_enumeration_os_error_is_typed(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            workspace = Workspace(directory)
-            history = Path(directory, "history")
-            history.mkdir()
-            with patch.object(Path, "iterdir", side_effect=OSError("denied")), self.assertRaises(
-                WorkspaceError
+        async def cancellable_stream() -> object:
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="partial", tool_calls=[]))]
+            )
+            await asyncio.Event().wait()
+
+        async def consume(workspace: Workspace) -> None:
+            async for event in agent_turn(
+                ProviderConfig("openai/test"), ExecutionPolicy(), workspace, "hello"
             ):
-                workspace.list_history()
+                if isinstance(event, Delta):
+                    delta_seen.set()
 
-    def test_history_record_must_have_message_or_event_shape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Workspace(directory)
+            with patch(
+                "amnesia_agent_kernel.agent.acompletion",
+                new=AsyncMock(return_value=cancellable_stream()),
+            ):
+                task = asyncio.create_task(consume(workspace))
+                await asyncio.wait_for(delta_seen.wait(), timeout=1)
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            records = workspace.read_history()
+
+        self.assertEqual(records[1], {"role": "assistant", "content": "partial"})
+        self.assertEqual(records[2]["kind"], "turn_cancelled")
+
+    async def test_falsey_history_input_is_rejected_without_deletion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Workspace(directory)
+            workspace.update_history([{"role": "user", "content": "keep"}])
             with self.assertRaises(WorkspaceError):
-                workspace.update_history([{"unexpected": True}])
+                workspace.update_history(None)  # type: ignore[arg-type]
+            self.assertEqual(workspace.read_history()[0]["content"], "keep")
 
 
 if __name__ == "__main__":

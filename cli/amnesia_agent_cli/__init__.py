@@ -1,4 +1,4 @@
-"""Command-line frontend for amnesia-agent-kernel."""
+"""Minimal CLI for amnesia-agent-kernel."""
 
 from amnesia_agent_cli.config import ConfigStore
 

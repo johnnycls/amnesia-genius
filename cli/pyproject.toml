@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amnesia-agent-cli"
-version = "0.5.0"
-description = "Terminal frontend for amnesia-agent-kernel."
+version = "0.6.0"
+description = "Minimal terminal CLI for amnesia-agent-kernel."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10,<3.15"
 dependencies = [
-    "amnesia-agent-kernel>=0.5,<0.6",
+    "amnesia-agent-kernel>=0.6,<0.7",
     "jsonschema>=4.23,<5",
 ]
 
@@ -32,6 +32,7 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 
 [tool.mypy]
 files = ["amnesia_agent_cli"]
+mypy_path = ["../kernel"]
 disallow_untyped_defs = true
 check_untyped_defs = true
 warn_return_any = true
@@ -39,6 +40,6 @@ warn_unused_ignores = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["litellm", "litellm.*"]
+module = ["litellm", "litellm.*", "jsonschema", "jsonschema.*"]
 ignore_missing_imports = true
 follow_imports = "skip"

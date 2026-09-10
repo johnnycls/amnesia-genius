@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from amnesia_agent_kernel.errors import WorkspaceError
 from amnesia_agent_kernel.history import Message
@@ -32,6 +32,19 @@ def _packaged_data(name: str) -> Any:
 class Workspace:
     """Persistent kernel state, excluding frontend-owned configuration."""
 
+    _lock_registry_guard: ClassVar[Any] = threading.Lock()
+    _lock_registry: ClassVar[dict[str, Any]] = {}
+
+    @classmethod
+    def _lock_for_root(cls, root: Path) -> Any:
+        key = os.path.normcase(str(root))
+        with cls._lock_registry_guard:
+            lock = cls._lock_registry.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                cls._lock_registry[key] = lock
+            return lock
+
     def __init__(
         self,
         root: str | os.PathLike[str] | None = None,
@@ -50,7 +63,7 @@ class Workspace:
         except (OSError, TypeError, ValueError) as e:
             raise WorkspaceError(f"Invalid workspace root {root!r}: {e}") from e
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        self._history_lock = threading.RLock()
+        self._history_lock = self._lock_for_root(self.root)
         self.setup()
 
     def _path(self, filename: str) -> Path:
@@ -157,6 +170,10 @@ class Workspace:
 
     def list_history(self) -> list[str]:
         """Return available daily history dates, newest first."""
+        with self._history_lock:
+            return self._list_history_unlocked()
+
+    def _list_history_unlocked(self) -> list[str]:
         directory = self._path(HISTORY_DIRECTORY)
         dates: list[str] = []
         try:
@@ -188,35 +205,47 @@ class Workspace:
             raise ValueError(f"line {number} is not a JSON object")
         if "role" not in value and "kind" not in value:
             raise ValueError(f"line {number} is not a message or history event")
-        if "role" in value and not isinstance(value["role"], str):
-            raise ValueError(f"line {number} has an invalid role")
+        if "role" in value:
+            role = value["role"]
+            if role not in ("system", "user", "assistant", "tool"):
+                raise ValueError(f"line {number} has an invalid role")
+            if "content" in value and value["content"] is not None and not isinstance(
+                value["content"], str
+            ):
+                raise ValueError(f"line {number} has invalid content")
+            if role == "tool" and (
+                not isinstance(value.get("tool_call_id"), str)
+                or not value["tool_call_id"]
+            ):
+                raise ValueError(f"line {number} has an invalid tool call ID")
         if "kind" in value and not isinstance(value["kind"], str):
             raise ValueError(f"line {number} has an invalid event kind")
         return value
 
     def read_history(self, date: str | None = None) -> list[Message]:
-        available_dates = self.list_history() if date is None else []
-        selected_date = available_dates[0] if available_dates else date
-        if selected_date is None:
-            return []
-        selected_date = self._validate_date(selected_date)
-        path = self._history_path(selected_date)
-        try:
-            try:
-                mode = path.stat().st_mode
-            except FileNotFoundError:
+        with self._history_lock:
+            available_dates = self._list_history_unlocked() if date is None else []
+            selected_date = available_dates[0] if available_dates else date
+            if selected_date is None:
                 return []
-            if not stat.S_ISREG(mode):
-                raise IsADirectoryError(path)
-            lines = path.read_text(encoding="utf-8").splitlines()
-            history: list[Message] = []
-            for number, line in enumerate(lines, start=1):
-                if not line.strip():
-                    continue
-                history.append(self._validate_history_record(json.loads(line), number))
-            return history
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
-            raise WorkspaceError(f"Cannot read history {path}: {e}", path=str(path)) from e
+            selected_date = self._validate_date(selected_date)
+            path = self._history_path(selected_date)
+            try:
+                try:
+                    mode = path.stat().st_mode
+                except FileNotFoundError:
+                    return []
+                if not stat.S_ISREG(mode):
+                    raise IsADirectoryError(path)
+                lines = path.read_text(encoding="utf-8").splitlines()
+                history: list[Message] = []
+                for number, line in enumerate(lines, start=1):
+                    if not line.strip():
+                        continue
+                    history.append(self._validate_history_record(json.loads(line), number))
+                return history
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
+                raise WorkspaceError(f"Cannot read history {path}: {e}", path=str(path)) from e
 
     @staticmethod
     def _serialize_history(messages: Sequence[Message]) -> str:
@@ -230,6 +259,8 @@ class Workspace:
             raise WorkspaceError(f"Cannot serialize history: {e}") from e
 
     def update_history(self, messages: Sequence[Message], date: str | None = None) -> None:
+        if isinstance(messages, (str, bytes, bytearray)) or not isinstance(messages, Sequence):
+            raise WorkspaceError("History messages must be a sequence of message objects")
         selected_date = self._validate_date(date) if date is not None else self._today()
         path = self._history_path(selected_date)
         with self._history_lock:

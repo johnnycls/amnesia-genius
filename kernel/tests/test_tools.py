@@ -15,6 +15,18 @@ def python_command(source: str) -> str:
 
 
 class ToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_command_timeout_returns_bounded_tool_text(self) -> None:
+        command = python_command("import time; print('before', flush=True); time.sleep(1)")
+        result = await run_bash(command, timeout_seconds=0.05)
+        self.assertIn("timed out", result)
+        self.assertIn("before", result)
+
+    async def test_output_overflow_terminates_and_marks_the_result(self) -> None:
+        command = python_command("print('x' * 1000000)")
+        result = await run_bash(command, max_output_bytes=1024)
+        self.assertIn("output truncated at 1024 bytes", result)
+        self.assertLess(len(result), 2000)
+
     async def test_full_output_is_returned(self) -> None:
         command = python_command("print('x' * 100)")
         result = await run_bash(command)

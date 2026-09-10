@@ -1,4 +1,4 @@
-"""Command-line frontend for the amnesia agent kernel."""
+"""Minimal command-line CLI for the amnesia agent kernel."""
 
 import argparse
 import asyncio
@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable
 from typing import TypeVar
 
-from amnesia_agent_kernel import Agent, AgentError, ConfigError
+from amnesia_agent_kernel import AgentError, ConfigError, KernelSession
 
 from amnesia_agent_cli import display
 from amnesia_agent_cli.config import ConfigStore
@@ -61,15 +61,15 @@ def _load_or_edit(loader: Callable[[], T]) -> T:
 
 
 async def _render_turn(
-    agent: Agent, user_input: str, renderer: display.TerminalRenderer
+    session: KernelSession, user_input: str, renderer: display.TerminalRenderer
 ) -> None:
     """Run one turn and render its events to the terminal."""
-    async for event in agent.turn(user_input):
+    async for event in session.turn(user_input):
         renderer.render(event)
 
 
 def _run() -> None:
-    """Seed frontend and kernel state, then run the interactive loop."""
+    """Seed CLI and kernel state, then run the interactive loop."""
     try:
         config_store = ConfigStore()
         config_store.setup()
@@ -79,19 +79,19 @@ def _run() -> None:
     renderer = display.TerminalRenderer()
     display.clear()
     while True:
-        config = _load_or_edit(config_store.load)
+        loaded = _load_or_edit(config_store.load)
         try:
             user_input: str = input("> ")
         except KeyboardInterrupt:
             print()
             return
         try:
-            agent = Agent(config)
+            session = KernelSession(loaded.provider, loaded.policy)
         except AgentError as e:
             report_error(e, f"while initializing from {config_store.path}")
             raise
         try:
-            asyncio.run(_render_turn(agent, user_input, renderer))
+            asyncio.run(_render_turn(session, user_input, renderer))
         except KeyboardInterrupt:
             renderer.reset()
             print()

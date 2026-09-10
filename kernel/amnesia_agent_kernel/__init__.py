@@ -1,6 +1,6 @@
 """Frontend-agnostic kernel for the amnesia agent."""
 
-from amnesia_agent_kernel.agent import validate_runtime_config, validate_runtime_values
+from amnesia_agent_kernel.agent import validate_execution_policy, validate_provider_config
 from amnesia_agent_kernel.errors import (
     AgentError,
     ConfigError,
@@ -10,22 +10,23 @@ from amnesia_agent_kernel.errors import (
     WorkspaceError,
 )
 from amnesia_agent_kernel.events import AssistantMessage, Delta, Event, ToolResult
-from amnesia_agent_kernel.kernel import Agent
-from amnesia_agent_kernel.types import RuntimeConfig
+from amnesia_agent_kernel.kernel import KernelSession
+from amnesia_agent_kernel.types import ExecutionPolicy, ProviderConfig
 
 __all__ = [
-    "Agent",
     "AgentError",
     "AssistantMessage",
     "ConfigError",
     "Delta",
     "Event",
+    "ExecutionPolicy",
+    "KernelSession",
+    "ProviderConfig",
     "ProviderError",
     "RenderError",
-    "RuntimeConfig",
     "ToolError",
     "ToolResult",
     "WorkspaceError",
-    "validate_runtime_config",
-    "validate_runtime_values",
+    "validate_execution_policy",
+    "validate_provider_config",
 ]

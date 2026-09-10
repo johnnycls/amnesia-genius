@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amnesia-agent-kernel"
-version = "0.5.0"
+version = "0.6.0"
 description = "A minimal, frontend-agnostic self-directed agent kernel."
 readme = "README.md"
 license = {text = "MIT"}
@@ -15,7 +15,7 @@ dependencies = ["litellm>=1.98,<2"]
 packages = ["amnesia_agent_kernel"]
 
 [tool.setuptools.package-data]
-"amnesia_agent_kernel" = ["data/*"]
+"amnesia_agent_kernel" = ["data/*", "py.typed"]
 
 [tool.ruff]
 target-version = "py310"

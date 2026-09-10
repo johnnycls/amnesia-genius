@@ -44,7 +44,7 @@ class ConfigErrorTests(unittest.TestCase):
                 encoding="utf-8",
             )
             config = ConfigStore(directory).load()
-            self.assertEqual(config.model, "openai/test")
+            self.assertEqual(config.provider.model, "openai/test")
 
 
 class CliErrorTests(unittest.TestCase):

@@ -1,8 +1,9 @@
-"""Bash command execution and tool-call dispatch."""
+"""Bounded bash execution and tool-call dispatch."""
 
 import asyncio
 import json
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -21,8 +22,8 @@ BASH_TOOL: dict[str, Any] = {
         "name": "bash",
         "description": (
             "Run a shell command and return its exit code plus combined stdout/stderr "
-            "as plain text. Use it for everything: file operations, running scripts, "
-            "API calls, and memory management."
+            "as plain text. Commands have a session timeout and bounded output. Use it "
+            "for file operations, running scripts, API calls, and memory management."
         ),
         "parameters": {
             "type": "object",
@@ -77,8 +78,129 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         raise ToolError(f"Could not wait for bash process: {e}", tool="bash") from e
 
 
-async def run_bash(command: str) -> str:
-    """Run a shell command and return its exit code plus combined output."""
+class _OutputCollector:
+    """Keep a bounded combined byte prefix from two output streams."""
+
+    def __init__(self, limit: int, timeout_seconds: float) -> None:
+        self.limit = limit
+        self.timeout_seconds = timeout_seconds
+        self.used = 0
+        self.overflowed = False
+        self._lock = asyncio.Lock()
+        self._streams: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
+
+    async def add(self, stream_name: str, chunk: bytes) -> bool:
+        async with self._lock:
+            remaining = self.limit - self.used
+            if remaining <= 0:
+                self.overflowed = True
+                return True
+            accepted = chunk[:remaining]
+            self._streams[stream_name].extend(accepted)
+            self.used += len(accepted)
+            if len(accepted) < len(chunk):
+                self.overflowed = True
+            return self.overflowed
+
+    def snapshot(self) -> tuple[bytes, bytes]:
+        return bytes(self._streams["stdout"]), bytes(self._streams["stderr"])
+
+
+async def _read_output(
+    stream: asyncio.StreamReader,
+    stream_name: str,
+    collector: _OutputCollector,
+) -> bool:
+    while True:
+        chunk = await stream.read(64 * 1024)
+        if not chunk:
+            return False
+        if await collector.add(stream_name, chunk):
+            return True
+
+
+async def _collect_output(
+    proc: asyncio.subprocess.Process,
+    collector: _OutputCollector,
+) -> None:
+    if proc.stdout is None or proc.stderr is None:
+        raise ToolError("Bash process did not provide output pipes", tool="bash")
+    readers = {
+        asyncio.create_task(_read_output(proc.stdout, "stdout", collector)),
+        asyncio.create_task(_read_output(proc.stderr, "stderr", collector)),
+    }
+    waiter = asyncio.create_task(proc.wait())
+    pending: set[asyncio.Task[Any]] = set()
+    pending.update(readers)
+    pending.add(waiter)
+    try:
+        while pending:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                if task is waiter:
+                    task.result()
+                elif task.result():
+                    await _terminate_process(proc)
+                    await asyncio.gather(*readers, return_exceptions=True)
+                    return
+    except asyncio.CancelledError:
+        try:
+            await _terminate_process(proc)
+        finally:
+            for task in readers | {waiter}:
+                task.cancel()
+            await asyncio.gather(*readers, waiter, return_exceptions=True)
+        raise
+    finally:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def _close_pipes(proc: asyncio.subprocess.Process) -> None:
+    """Drain/close asyncio subprocess transports after manual stream reads."""
+    try:
+        await proc.communicate()
+    except (OSError, RuntimeError, ValueError):
+        logger.debug("Could not close bash output pipes cleanly", exc_info=True)
+
+
+def _format_output(
+    proc: asyncio.subprocess.Process,
+    collector: _OutputCollector,
+    timed_out: bool,
+) -> str:
+    stdout, stderr = collector.snapshot()
+    output = (stdout + stderr).decode("utf-8", "replace").strip() or "(no output)"
+    status = proc.returncode
+    suffix = ""
+    if timed_out:
+        suffix = f"\n[command timed out after {collector.timeout_seconds:g} seconds]"
+    elif collector.overflowed:
+        suffix = f"\n[output truncated at {collector.limit} bytes; process terminated]"
+    return f"exit code: {status}\noutput: {output}{suffix}"
+
+
+async def run_bash(
+    command: str,
+    timeout_seconds: float = 120.0,
+    max_output_bytes: int = 256 * 1024,
+) -> str:
+    """Run a shell command with timeout and combined-output limits."""
+    if not isinstance(command, str) or not command:
+        raise ToolError("bash command must be a non-empty string", tool="bash")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+        or isinstance(max_output_bytes, bool)
+        or not isinstance(max_output_bytes, int)
+        or max_output_bytes <= 0
+    ):
+        raise ToolError("bash execution limits must be positive", tool="bash", command=command)
     try:
         options = _process_options()
         proc: asyncio.subprocess.Process = await asyncio.create_subprocess_shell(
@@ -92,34 +214,32 @@ async def run_bash(command: str) -> str:
     except (OSError, TypeError, ValueError) as e:
         raise ToolError(f"Could not start bash command: {e}", tool="bash", command=command) from e
 
-    if proc.stdout is None or proc.stderr is None:
-        try:
-            await _terminate_process(proc)
-        except ToolError:
-            logger.error("Bash process cleanup failed after missing output pipes", exc_info=True)
-        raise ToolError("Bash process did not provide output pipes", tool="bash", command=command)
+    collector = _OutputCollector(max_output_bytes, timeout_seconds)
     try:
-        stdout, stderr = await proc.communicate()
-    except asyncio.CancelledError:
+        await asyncio.wait_for(_collect_output(proc, collector), timeout_seconds)
+    except asyncio.TimeoutError:
         try:
             await _terminate_process(proc)
         except ToolError:
-            logger.error("Bash process cleanup failed after cancellation", exc_info=True)
+            logger.error("Bash process cleanup failed after timeout", exc_info=True)
+        await _close_pipes(proc)
+        return _format_output(proc, collector, timed_out=True)
+    except asyncio.CancelledError:
+        raise
+    except ToolError:
         raise
     except Exception as e:
         try:
             await _terminate_process(proc)
         except ToolError:
-            logger.error("Bash process cleanup also failed", exc_info=True)
+            logger.error("Bash process cleanup failed after collection error", exc_info=True)
         raise ToolError(
             f"Could not collect bash output: {type(e).__name__}: {e}",
             tool="bash",
             command=command,
         ) from e
-    output: str = (
-        stdout.decode("utf-8", "replace") + stderr.decode("utf-8", "replace")
-    ).strip() or "(no output)"
-    return f"exit code: {proc.returncode}\noutput: {output}"
+    await _close_pipes(proc)
+    return _format_output(proc, collector, timed_out=False)
 
 
 def _parse_command(raw_arguments: str) -> str:
@@ -128,8 +248,8 @@ def _parse_command(raw_arguments: str) -> str:
     if not isinstance(arguments, dict):
         raise TypeError("tool arguments must be a JSON object")
     command: Any = arguments["command"]
-    if not isinstance(command, str):
-        raise TypeError("'command' must be a string")
+    if not isinstance(command, str) or not command:
+        raise TypeError("'command' must be a non-empty string")
     return command
 
 
@@ -137,8 +257,12 @@ def _tool_error_text(error: Exception) -> str:
     return f"error: {type(error).__name__}: {error}"
 
 
-async def run_tool_call(call: dict[str, Any]) -> str:
-    """Parse a tool call and run its bash command, returning the result text."""
+async def run_tool_call(
+    call: dict[str, Any],
+    timeout_seconds: float = 120.0,
+    max_output_bytes: int = 256 * 1024,
+) -> str:
+    """Parse a tool call and run its bash command, returning result text."""
     try:
         if not isinstance(call, dict):
             raise ToolError("tool call must be an object", tool="bash")
@@ -149,25 +273,29 @@ async def run_tool_call(call: dict[str, Any]) -> str:
     except (AttributeError, json.JSONDecodeError, KeyError, TypeError, ToolError) as e:
         return _tool_error_text(e)
     try:
-        return await run_bash(command)
+        return await run_bash(command, timeout_seconds, max_output_bytes)
     except ToolError as e:
         return _tool_error_text(e)
 
 
 def _tool_message(call: dict[str, Any], content: str) -> Message:
     """Build a tool-result message matching the given tool call."""
-    return {
-        "role": "tool",
-        "tool_call_id": call.get("id", "") if isinstance(call, dict) else "",
-        "content": content,
-    }
+    call_id = call.get("id") if isinstance(call, dict) else None
+    if not isinstance(call_id, str) or not call_id:
+        raise ToolError("tool call had no valid ID", tool="bash")
+    return {"role": "tool", "tool_call_id": call_id, "content": content}
 
 
 async def execute_tool_calls(
     tool_calls: Sequence[dict[str, Any]],
+    timeout_seconds: float = 120.0,
+    max_output_bytes: int = 256 * 1024,
 ) -> list[Message]:
-    """Execute independent calls concurrently and return results in call order."""
-    tasks = [asyncio.create_task(run_tool_call(call)) for call in tool_calls]
+    """Execute all calls concurrently and return results in call order."""
+    tasks = [
+        asyncio.create_task(run_tool_call(call, timeout_seconds, max_output_bytes))
+        for call in tool_calls
+    ]
     try:
         results = await asyncio.gather(*tasks)
     except BaseException:

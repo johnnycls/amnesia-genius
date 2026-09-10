@@ -7,8 +7,9 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from amnesia_agent_kernel.agent import _assistant_message, _request_kwargs, agent_turn
+from amnesia_agent_kernel.errors import ProviderError
 from amnesia_agent_kernel.events import AssistantMessage, Delta, ToolResult
-from amnesia_agent_kernel.types import RuntimeConfig
+from amnesia_agent_kernel.types import ExecutionPolicy, ProviderConfig
 from amnesia_agent_kernel.workspace import Workspace
 
 
@@ -32,14 +33,8 @@ async def stream(*chunks: Any) -> Any:
         yield item
 
 
-def make_config() -> RuntimeConfig:
-    return RuntimeConfig(
-        model="openai/test",
-        api_key=None,
-        base_url=None,
-        provider_params=None,
-        max_context_message_chars=1000,
-    )
+def make_config() -> ProviderConfig:
+    return ProviderConfig(model="openai/test")
 
 
 class AssistantMessageTests(unittest.TestCase):
@@ -54,6 +49,10 @@ class AssistantMessageTests(unittest.TestCase):
 
     def test_omits_tool_calls_key_when_absent(self) -> None:
         self.assertEqual(_assistant_message(["hi"], {}), {"role": "assistant", "content": "hi"})
+
+    def test_rejects_tool_call_without_id(self) -> None:
+        with self.assertRaises(ProviderError):
+            _assistant_message([], {0: {"id": "", "function": {"name": "bash", "arguments": "{}"}}})
 
 
 class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
@@ -91,7 +90,7 @@ class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
                 events = [
                     event
                     async for event in agent_turn(
-                        make_config(), workspace, "hi"
+                        make_config(), ExecutionPolicy(), workspace, "hi"
                     )
                 ]
             history_files = sorted(Path(directory, "history").glob("*.jsonl"))
@@ -122,12 +121,11 @@ class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history_roles, ["user", "assistant", "tool", "assistant"])
 
     async def test_request_kwargs_give_config_priority_over_provider_params(self) -> None:
-        config = RuntimeConfig(
+        config = ProviderConfig(
             model="openai/test",
             api_key="key",
             base_url="https://example.com",
             provider_params={"model": "sneaky", "temperature": 0.5},
-            max_context_message_chars=1000,
         )
         kwargs = _request_kwargs(config, messages=[], tools=[])
         self.assertEqual(kwargs["model"], "openai/test")

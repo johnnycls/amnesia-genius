@@ -33,7 +33,7 @@ class ConfigTests(unittest.TestCase):
             store.reset()
             self.assertIn('"model": ""', store.path.read_text(encoding="utf-8"))
 
-    def test_provider_params_satisfy_missing_env_keys(self) -> None:
+    def test_provider_params_are_loaded_without_provider_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             self.write_config(
                 directory,
@@ -46,10 +46,11 @@ class ConfigTests(unittest.TestCase):
                 },
             )
             config = ConfigStore(directory).load()
-            self.assertEqual(config.model, "bedrock/us.anthropic.claude-sonnet-4-5")
+            self.assertEqual(config.provider.model, "bedrock/us.anthropic.claude-sonnet-4-5")
             self.assertEqual(
-                config.provider_params["aws_access_key_id"], "AKIA"
+                config.provider.provider_params["aws_access_key_id"], "AKIA"
             )
+            self.assertEqual(config.policy.max_context_message_chars, 1000)
 
 
 if __name__ == "__main__":

@@ -1,31 +1,52 @@
-"""Public kernel Agent API."""
+"""Public session API for the kernel."""
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Sequence
 
-from amnesia_agent_kernel.agent import agent_turn, validate_runtime_config, validate_runtime_values
+from amnesia_agent_kernel.agent import (
+    agent_turn,
+    validate_execution_policy,
+    validate_provider_config,
+    validate_provider_environment,
+)
 from amnesia_agent_kernel.events import Event
 from amnesia_agent_kernel.history import Message
-from amnesia_agent_kernel.types import RuntimeConfig
+from amnesia_agent_kernel.types import ExecutionPolicy, ProviderConfig
 from amnesia_agent_kernel.workspace import Workspace
 
 
-class Agent:
-    """Frontend-agnostic agent bound to one config snapshot and workspace root."""
+class KernelSession:
+    """A provider configuration, execution policy, and workspace session."""
 
     def __init__(
         self,
-        config: RuntimeConfig,
+        provider: ProviderConfig,
+        policy: ExecutionPolicy | None = None,
         workspace_root: str | os.PathLike[str] | None = None,
     ) -> None:
-        validate_runtime_values(config)
-        validate_runtime_config(config)
-        self.config = config
+        validate_provider_config(provider)
+        validate_provider_environment(provider)
+        selected_policy = policy or ExecutionPolicy()
+        validate_execution_policy(selected_policy)
+        self.provider = provider.snapshot()
+        self.policy = selected_policy
         self._workspace = Workspace(workspace_root)
+        self._turn_lock = asyncio.Lock()
 
     def turn(self, user_input: str) -> AsyncIterator[Event]:
-        """Return an async event iterator for one user turn."""
-        return agent_turn(self.config, self._workspace, user_input)
+        """Queue and stream one turn, preserving history order."""
+        return self._queued_turn(user_input)
+
+    async def _queued_turn(self, user_input: str) -> AsyncIterator[Event]:
+        async with self._turn_lock:
+            async for event in agent_turn(
+                self.provider,
+                self.policy,
+                self._workspace,
+                user_input,
+            ):
+                yield event
 
     def read_system_prompt(self) -> str:
         return self._workspace.read_system_prompt()

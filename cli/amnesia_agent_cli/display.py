@@ -1,4 +1,4 @@
-"""Terminal rendering of kernel events (used by the CLI front-end)."""
+"""Terminal rendering of kernel events for the demo CLI."""
 
 import ctypes
 import json
@@ -74,7 +74,7 @@ def _tool_command(call: dict[str, Any]) -> str:
     raw: Any = ""
     try:
         function = call.get("function", {})
-        raw: Any = function.get("arguments", "") if isinstance(function, dict) else ""
+        raw = function.get("arguments", "") if isinstance(function, dict) else ""
         arguments: Any = json.loads(raw)
         command: Any = arguments["command"]
         if isinstance(command, str):

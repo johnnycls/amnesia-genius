@@ -14,14 +14,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ./kernel
-      - run: pip install ./frontend ruff mypy
+      - run: pip install ./cli ruff mypy
       - working-directory: kernel
         run: ruff check .
       - working-directory: kernel
         run: mypy
-      - working-directory: frontend
+      - working-directory: cli
         run: ruff check .
-      - working-directory: frontend
+      - working-directory: cli
         run: mypy
 
   test:
@@ -37,8 +37,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install ./kernel
-      - run: pip install ./frontend
+      - run: pip install ./cli
       - working-directory: kernel
         run: python -m unittest discover -t . -s tests -v
-      - working-directory: frontend
+      - working-directory: cli
         run: python -m unittest discover -t . -s tests -v

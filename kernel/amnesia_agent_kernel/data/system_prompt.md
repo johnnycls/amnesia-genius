@@ -125,8 +125,8 @@ Prefer a durable program over repeating a complicated command.
 
 ## Context budget
 
-Non-user history content longer than max_context_message_chars (see the frontend
-configuration for the current value) is truncated before you see it. User messages are never
+Non-user history content longer than max_context_message_chars (see the session
+ExecutionPolicy for the current value) is truncated before you see it. User messages are never
 truncated. For commands that may produce
 long output, slice it yourself up front (head, tail, grep / findstr /
 Select-String) instead of flooding the context.

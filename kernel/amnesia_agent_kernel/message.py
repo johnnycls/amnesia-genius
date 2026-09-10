@@ -43,11 +43,11 @@ def build_messages(
         or max_context_message_chars <= 0
     ):
         raise ConfigError("max_context_message_chars must be a positive integer")
+    memory = workspace.read_memory()
+    if not isinstance(memory, str):
+        raise ProviderError("Memory content must be text")
     messages: list[Message] = [
-        {
-            "role": "system",
-            "content": f"{system_prompt}\n\n{workspace.read_memory()}",
-        },
+        {"role": "system", "content": f"{system_prompt}\n\n{memory}"},
         {"role": "user", "content": user_input},
     ]
     for message in turn_messages:

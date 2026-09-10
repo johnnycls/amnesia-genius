@@ -9,7 +9,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 
-from amnesia_agent_kernel import ConfigError, RuntimeConfig
+from amnesia_agent_kernel import ConfigError, ExecutionPolicy, ProviderConfig
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
@@ -22,7 +22,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "additionalProperties": False,
-    "required": ["model", "max_context_message_chars"],
+    "required": ["model"],
     "properties": {
         "model": {"type": "string", "minLength": 1},
         "api_key": {"type": ["string", "null"]},
@@ -30,13 +30,21 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "provider_params": {
             "type": "object",
             "propertyNames": {"minLength": 1},
-            "additionalProperties": {
-                "type": ["string", "number", "boolean"],
-            },
+            "additionalProperties": {"type": ["string", "number", "boolean"]},
         },
+        "command_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "max_command_output_bytes": {"type": "integer", "exclusiveMinimum": 0},
         "max_context_message_chars": {"type": "integer", "exclusiveMinimum": 0},
     },
 }
+
+
+@dataclass(frozen=True)
+class LoadedConfig:
+    """The provider settings and execution policy loaded by the CLI."""
+
+    provider: ProviderConfig
+    policy: ExecutionPolicy
 
 
 def _packaged_config() -> Any:
@@ -50,7 +58,7 @@ def _schema_error_message(error: ValidationError) -> str:
 
 @dataclass(frozen=True)
 class ConfigStore:
-    """Persistent frontend configuration, separate from the kernel workspace."""
+    """Persistent CLI configuration, separate from the kernel workspace."""
 
     root: Path = DEFAULT_CONFIG_DIR
 
@@ -63,9 +71,7 @@ class ConfigStore:
             raise ConfigError("Config root must not be empty.")
         try:
             resolved = (
-                Path(root).expanduser().absolute()
-                if root is not None
-                else DEFAULT_CONFIG_DIR
+                Path(root).expanduser().absolute() if root is not None else DEFAULT_CONFIG_DIR
             )
         except (OSError, TypeError, ValueError) as e:
             raise ConfigError(f"Invalid config root {root!r}: {e}") from e
@@ -100,8 +106,8 @@ class ConfigStore:
                 path=str(self.path),
             ) from e
 
-    def load(self) -> RuntimeConfig:
-        """Load and validate the frontend config without contacting the provider."""
+    def load(self) -> LoadedConfig:
+        """Load and validate CLI settings without contacting the provider."""
         if not self.path.exists():
             self.setup()
         try:
@@ -114,7 +120,7 @@ class ConfigStore:
 
         return self._parse(raw_value)
 
-    def _parse(self, raw_value: Any) -> RuntimeConfig:
+    def _parse(self, raw_value: Any) -> LoadedConfig:
         try:
             Draft202012Validator(CONFIG_SCHEMA).validate(raw_value)
         except ValidationError as e:
@@ -128,18 +134,26 @@ class ConfigStore:
         model = self._required_string(raw["model"], "model")
         if not model.strip():
             raise ConfigError("'model' must be a non-empty string.", path=str(self.path))
-        api_key = self._optional_string(raw.get("api_key"), "api_key")
-        base_url = self._optional_string(raw.get("base_url"), "base_url")
-        provider_params = self._load_provider_params(raw.get("provider_params"))
-        return RuntimeConfig(
+        provider = ProviderConfig(
             model=model,
-            api_key=api_key,
-            base_url=base_url,
-            provider_params=provider_params,
+            api_key=self._optional_string(raw.get("api_key"), "api_key"),
+            base_url=self._optional_string(raw.get("base_url"), "base_url"),
+            provider_params=self._load_provider_params(raw.get("provider_params")),
+        )
+        policy = ExecutionPolicy(
+            command_timeout_seconds=self._positive_number(
+                raw.get("command_timeout_seconds", 120.0), "command_timeout_seconds"
+            ),
+            max_command_output_bytes=self._positive_integer(
+                raw.get("max_command_output_bytes", 256 * 1024),
+                "max_command_output_bytes",
+            ),
             max_context_message_chars=self._positive_integer(
-                raw["max_context_message_chars"], "max_context_message_chars"
+                raw.get("max_context_message_chars", 1000),
+                "max_context_message_chars",
             ),
         )
+        return LoadedConfig(provider=provider, policy=policy)
 
     def _required_string(self, value: Any, key: str) -> str:
         if isinstance(value, bool) or not isinstance(value, str):
@@ -157,6 +171,13 @@ class ConfigStore:
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ConfigError(f"'{key}' must be a positive integer.", path=str(self.path))
         return cast(int, value)
+
+    def _positive_number(self, value: Any, key: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConfigError(f"'{key}' must be a positive number.", path=str(self.path))
+        if not math.isfinite(value) or value <= 0:
+            raise ConfigError(f"'{key}' must be a finite positive number.", path=str(self.path))
+        return float(value)
 
     def _load_provider_params(self, value: Any) -> dict[str, ScalarValue] | None:
         if value is None:

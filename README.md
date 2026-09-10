@@ -23,7 +23,7 @@ An agent doesn't need dozens of bespoke tools; it needs **one tool that can do e
 `amnesia-agent` is a minimal self-directed LLM agent split into two independently packaged projects:
 
 - **`amnesia-agent-kernel`** — the frontend-agnostic async agent kernel.
-- **`amnesia-agent-cli`** — the terminal frontend and frontend-owned configuration store.
+- **`amnesia-agent-cli`** — the minimal terminal CLI demo and CLI-owned configuration store.
 
 ## Safety
 
@@ -35,7 +35,7 @@ model and workspace.
 
 ```text
 pip install ./kernel
-pip install ./frontend
+pip install ./cli
 amnesia-agent
 ```
 
@@ -54,7 +54,7 @@ The command creates two separate user-owned directories:
 ```
 
 The CLI configuration is intentionally outside the kernel workspace. It is loaded,
-validated, and passed to the kernel as an in-memory `RuntimeConfig`.
+validated, and passed to the kernel as in-memory `ProviderConfig` and `ExecutionPolicy` values.
 
 There is no automatic migration from the previous `~/.amnesia-genius` directory.
 Copy files manually if you want to preserve old state.
@@ -64,17 +64,17 @@ Copy files manually if you want to preserve old state.
 ```python
 import asyncio
 
-from amnesia_agent_kernel import Agent, AssistantMessage, Delta, ToolResult
+from amnesia_agent_kernel import AssistantMessage, Delta, KernelSession, ToolResult
 from amnesia_agent_cli.config import ConfigStore
 
 
 async def run() -> None:
     config_store = ConfigStore()
     config_store.setup()
-    config = config_store.load()
-    agent = Agent(config)
+    loaded = config_store.load()
+    session = KernelSession(loaded.provider, loaded.policy)
 
-    async for event in agent.turn("hello"):
+    async for event in session.turn("hello"):
         if isinstance(event, Delta):
             print(event.text, end="", flush=True)
         elif isinstance(event, AssistantMessage):
@@ -87,33 +87,34 @@ asyncio.run(run())
 ```
 
 The kernel does not know about `config.json`, the CLI, terminal rendering, or the
-frontend package. Construct a new `Agent` when a new validated configuration
+CLI package. Construct a new `KernelSession` when a new validated configuration
 snapshot is available.
 
-## Agent workspace API
+## Session workspace API
 
-`Agent(config)` defaults to the kernel workspace at `~/.amnesia-agent`. A custom
-workspace root can be passed when embedding or testing:
+`KernelSession(provider, policy)` defaults to the kernel workspace at
+`~/.amnesia-agent`. A custom workspace root can be passed when embedding or
+testing:
 
 ```python
-agent = Agent(config, workspace_root="/path/to/state")
+session = KernelSession(provider, policy, workspace_root="/path/to/state")
 ```
 
-The kernel exposes controlled state operations through `Agent`:
+The kernel exposes controlled state operations through `KernelSession`:
 
 ```python
-agent.read_system_prompt()
-agent.update_system_prompt(text)
-agent.reset_system_prompt()
-agent.read_memory()
-agent.update_memory(text)
-agent.reset_memory()
-agent.list_history()                 # newest ISO dates first
-agent.read_history()                 # newest daily history
-agent.read_history("2026-08-28")    # one UTC date
-agent.update_history(messages, "2026-08-28")
-agent.reset_history()
-agent.reset_workspace()
+session.read_system_prompt()
+session.update_system_prompt(text)
+session.reset_system_prompt()
+session.read_memory()
+session.update_memory(text)
+session.reset_memory()
+session.list_history()                 # newest ISO dates first
+session.read_history()                 # newest daily history
+session.read_history("2026-08-28")    # one UTC date
+session.update_history(messages, "2026-08-28")
+session.reset_history()
+session.reset_workspace()
 ```
 
 History is stored as one JSONL file per UTC date under `history/`. `list_history()`
@@ -125,6 +126,6 @@ Configuration reset is handled separately by `ConfigStore.reset()`.
 ## Project layout
 
 - [`kernel/README.md`](kernel/README.md) — kernel API and behavior.
-- [`frontend/README.md`](frontend/README.md) — CLI, config, and installation details.
+- [`cli/README.md`](cli/README.md) — CLI, config, and installation details.
 - [`kernel/pyproject.toml`](kernel/pyproject.toml) — kernel distribution metadata.
-- [`frontend/pyproject.toml`](frontend/pyproject.toml) — frontend distribution metadata.
+- [`cli/pyproject.toml`](cli/pyproject.toml) — CLI distribution metadata.
