@@ -4,7 +4,7 @@ import asyncio
 import logging
 import math
 from collections.abc import AsyncIterator, Mapping
-from typing import Any
+from typing import Any, cast
 
 import litellm
 from litellm import acompletion
@@ -24,7 +24,15 @@ from amnesia_agent_kernel.types import ExecutionPolicy, ProviderConfig
 from amnesia_agent_kernel.workspace import Workspace
 
 logger = logging.getLogger(__name__)
-_RESERVED_REQUEST_KEYS = {"model", "messages", "tools", "stream", "api_key", "api_base"}
+_RESERVED_REQUEST_KEYS = {
+    "model",
+    "messages",
+    "tools",
+    "stream",
+    "api_key",
+    "api_base",
+    "response_format",
+}
 
 
 def validate_provider_config(config: ProviderConfig) -> None:
@@ -68,6 +76,38 @@ def validate_execution_policy(policy: ExecutionPolicy) -> None:
         value = getattr(policy, name)
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ConfigError(f"{name} must be a positive integer")
+
+
+def _snapshot_json_value(value: Any, path: str) -> Any:
+    """Validate and defensively copy one JSON-compatible value."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ConfigError(f"{path} must contain finite numbers")
+        return value
+    if isinstance(value, Mapping):
+        copied: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ConfigError(f"{path} object keys must be strings")
+            copied[key] = _snapshot_json_value(item, f"{path}.{key}")
+        return copied
+    if isinstance(value, list):
+        return [_snapshot_json_value(item, f"{path}[{index}]") for index, item in enumerate(value)]
+    raise ConfigError(f"{path} must contain only JSON-compatible values")
+
+
+def _snapshot_response_format(response_format: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Validate and copy a LiteLLM response format supplied for one turn."""
+    if response_format is None:
+        return None
+    if not isinstance(response_format, Mapping):
+        raise ConfigError("response_format must be a JSON object or None")
+    return cast(
+        dict[str, Any],
+        _snapshot_json_value(response_format, "response_format"),
+    )
 
 
 def _request_kwargs(config: ProviderConfig, **extra: Any) -> dict[str, Any]:
@@ -196,10 +236,12 @@ async def agent_turn(
     policy: ExecutionPolicy,
     workspace: Workspace,
     user_input: str,
+    response_format: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[Event]:
     """Run one user turn until the model stops calling tools."""
     if not isinstance(user_input, str):
         raise ConfigError("user_input must be text")
+    response_format = _snapshot_response_format(response_format)
     workspace.append_history({"role": "user", "content": user_input})
     turn_messages: list[Message] = []
     parts: list[str] = []
@@ -216,8 +258,15 @@ async def agent_turn(
                 workspace,
             )
             try:
+                request_kwargs: dict[str, Any] = {
+                    "messages": messages,
+                    "tools": [BASH_TOOL],
+                    "stream": True,
+                }
+                if response_format is not None:
+                    request_kwargs["response_format"] = response_format
                 response: Any = await acompletion(
-                    **_request_kwargs(config, messages=messages, tools=[BASH_TOOL], stream=True)
+                    **_request_kwargs(config, **request_kwargs)
                 )
             except asyncio.CancelledError:
                 raise

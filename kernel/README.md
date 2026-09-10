@@ -38,11 +38,39 @@ the model or provider is not trusted.
 
 ## Turns and events
 
-`KernelSession.turn(text)` returns an async iterator of:
+`KernelSession.turn(text, response_format=None)` returns an async iterator of:
 
 - `Delta` — streamed assistant text.
 - `AssistantMessage` — a complete assistant response, including tool calls.
 - `ToolResult` — one result per executed bash call.
+
+`response_format` is an optional JSON object passed to LiteLLM for providers that
+support structured outputs. For example:
+
+```python
+response_format = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "answer",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+async for event in session.turn("Answer this", response_format=response_format):
+    ...
+```
+
+The kernel validates that the format contains only JSON-compatible values and
+makes a defensive copy before sending it to the provider. The structured result
+is still exposed as the model's JSON text in `AssistantMessage.message["content"]`;
+the frontend can parse it with `json.loads` after receiving the complete message.
+Provider support for a particular structured-output format varies by model.
 
 Concurrent turns on one session are queued and serialized. Tool commands are
 executed concurrently. Command timeout and output-limit failures are returned as

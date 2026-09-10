@@ -86,6 +86,31 @@ async def run() -> None:
 asyncio.run(run())
 ```
 
+A frontend can request structured model output for an individual turn by passing
+LiteLLM's `response_format` object:
+
+```python
+response_format = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "answer",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+async for event in session.turn("hello", response_format=response_format):
+    ...
+```
+
+The completed assistant event contains the structured response as JSON text in
+`event.message["content"]`; the frontend may parse it with `json.loads`.
+
 The kernel does not know about `config.json`, the CLI, terminal rendering, or the
 CLI package. Construct a new `KernelSession` when a new validated configuration
 snapshot is available.

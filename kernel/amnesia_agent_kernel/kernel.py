@@ -2,7 +2,8 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from typing import Any
 
 from amnesia_agent_kernel.agent import (
     agent_turn,
@@ -34,17 +35,26 @@ class KernelSession:
         self._workspace = Workspace(workspace_root)
         self._turn_lock = asyncio.Lock()
 
-    def turn(self, user_input: str) -> AsyncIterator[Event]:
-        """Queue and stream one turn, preserving history order."""
-        return self._queued_turn(user_input)
+    def turn(
+        self,
+        user_input: str,
+        response_format: Mapping[str, Any] | None = None,
+    ) -> AsyncIterator[Event]:
+        """Queue and stream one turn, optionally requesting structured output."""
+        return self._queued_turn(user_input, response_format)
 
-    async def _queued_turn(self, user_input: str) -> AsyncIterator[Event]:
+    async def _queued_turn(
+        self,
+        user_input: str,
+        response_format: Mapping[str, Any] | None,
+    ) -> AsyncIterator[Event]:
         async with self._turn_lock:
             async for event in agent_turn(
                 self.provider,
                 self.policy,
                 self._workspace,
                 user_input,
+                response_format,
             ):
                 yield event
 
