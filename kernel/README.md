@@ -34,7 +34,7 @@ The workspace owns:
 
 - `system_prompt.md`
 - `memory.md`
-- `history.jsonl`
+- `history/YYYY-MM-DD.jsonl` daily history files (UTC dates)
 
 It does not own or read frontend configuration.
 
@@ -46,9 +46,10 @@ It does not own or read frontend configuration.
 - `AssistantMessage` — a complete assistant response, including tool calls.
 - `ToolResult` — one result per executed bash call.
 
-The kernel persists user, assistant, and tool messages in `history.jsonl` as the
-turn progresses. It does not automatically replay old history into model context.
-The model can read the history through its bash capability when needed.
+The kernel persists user, assistant, and tool messages in the current UTC day's
+`history/YYYY-MM-DD.jsonl` as the turn progresses. It does not automatically replay
+old history into model context. The model can read the history files through its bash
+capability when needed.
 
 ## Workspace operations
 
@@ -65,14 +66,19 @@ agent.read_memory()
 agent.update_memory(text)
 agent.reset_memory()
 
-agent.read_history()
-agent.update_history(messages)
+agent.list_history()                 # newest ISO dates first
+agent.read_history()                 # newest daily history
+agent.read_history("2026-08-28")    # one UTC date
+agent.update_history(messages, "2026-08-28")
 agent.reset_history()
 agent.reset_workspace()
 ```
 
 The bash tool schema is a kernel constant. It is not copied to the workspace and
 cannot be changed through workspace files.
+
+The old root-level `history.jsonl`, if present from an earlier version, is retained
+but ignored. New workspaces do not seed that legacy file.
 
 ## Boundary
 

@@ -29,7 +29,9 @@ The command creates two separate user-owned directories:
 ~/.amnesia-agent/
 ├── system_prompt.md
 ├── memory.md
-└── history.jsonl
+└── history/
+    ├── 2026-08-27.jsonl
+    └── 2026-08-28.jsonl
 
 ~/.amnesia-agent-cli/
 └── config.json
@@ -90,13 +92,18 @@ agent.reset_system_prompt()
 agent.read_memory()
 agent.update_memory(text)
 agent.reset_memory()
-agent.read_history()
-agent.update_history(messages)
+agent.list_history()                 # newest ISO dates first
+agent.read_history()                 # newest daily history
+agent.read_history("2026-08-28")    # one UTC date
+agent.update_history(messages, "2026-08-28")
 agent.reset_history()
 agent.reset_workspace()
 ```
 
-`reset_workspace()` restores the packaged prompt and memory and clears history.
+History is stored as one JSONL file per UTC date under `history/`. `list_history()`
+returns available dates newest first. `read_history()` reads the newest date by
+default or an explicitly supplied `YYYY-MM-DD` date. `reset_workspace()` restores
+the packaged prompt and memory and clears all daily history files.
 Configuration reset is handled separately by `ConfigStore.reset()`.
 
 ## Project layout

@@ -43,11 +43,14 @@ class Agent:
     def reset_memory(self) -> None:
         self._workspace.reset_memory()
 
-    def read_history(self) -> list[Message]:
-        return self._workspace.read_history()
+    def read_history(self, date: str | None = None) -> list[Message]:
+        return self._workspace.read_history(date)
 
-    def update_history(self, messages: Sequence[Message]) -> None:
-        self._workspace.update_history(messages)
+    def list_history(self) -> list[str]:
+        return self._workspace.list_history()
+
+    def update_history(self, messages: Sequence[Message], date: str | None = None) -> None:
+        self._workspace.update_history(messages, date)
 
     def reset_history(self) -> None:
         self._workspace.reset_history()

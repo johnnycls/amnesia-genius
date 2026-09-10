@@ -18,8 +18,10 @@ class KernelTests(unittest.TestCase):
     def test_workspace_constructor_seeds_kernel_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             agent = Agent(self.make_config(), directory)
-            for name in ("system_prompt.md", "memory.md", "history.jsonl"):
+            for name in ("system_prompt.md", "memory.md"):
                 self.assertTrue((agent._workspace.root / name).exists(), name)
+            self.assertFalse((agent._workspace.root / "history.jsonl").exists())
+            self.assertFalse((agent._workspace.root / "history").exists())
             self.assertFalse((agent._workspace.root / "config.json").exists())
 
     def test_workspace_reset_restores_prompt_memory_and_history(self) -> None:

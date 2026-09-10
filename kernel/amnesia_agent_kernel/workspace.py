@@ -2,8 +2,10 @@
 
 import json
 import os
+import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -15,8 +17,9 @@ DEFAULT_WORKSPACE = Path.home() / ".amnesia-agent"
 WORKSPACE_FILES: tuple[str, ...] = (
     "system_prompt.md",
     "memory.md",
-    "history.jsonl",
 )
+HISTORY_DIRECTORY = "history"
+HISTORY_FILENAME = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})\.jsonl")
 
 
 def _packaged_data(name: str) -> Any:
@@ -30,8 +33,13 @@ class Workspace:
     The workspace never reads or writes frontend configuration.
     """
 
-    def __init__(self, root: str | os.PathLike[str] | None = None) -> None:
+    def __init__(
+        self,
+        root: str | os.PathLike[str] | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.root: Path = Path(root).expanduser().absolute() if root else DEFAULT_WORKSPACE
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.setup()
 
     def _path(self, filename: str) -> Path:
@@ -95,8 +103,57 @@ class Workspace:
     def reset_memory(self) -> None:
         self._reset_from_package("memory.md")
 
-    def read_history(self) -> list[Message]:
-        path = self._path("history.jsonl")
+    def _today(self) -> str:
+        now = self._clock()
+        if now.tzinfo is None:
+            current = now
+        else:
+            current = now.astimezone(timezone.utc)
+        return current.date().isoformat()
+
+    @staticmethod
+    def _validate_date(value: str) -> str:
+        if not isinstance(value, str):
+            raise AgentError("History date must be an ISO date in YYYY-MM-DD format")
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError as e:
+            raise AgentError(
+                f"Invalid history date {value!r}; expected YYYY-MM-DD"
+            ) from e
+        if parsed.isoformat() != value:
+            raise AgentError(f"Invalid history date {value!r}; expected YYYY-MM-DD")
+        return value
+
+    def _history_path(self, date: str) -> Path:
+        return self._path(HISTORY_DIRECTORY) / f"{date}.jsonl"
+
+    def list_history(self) -> list[str]:
+        """Return available daily history dates, newest first."""
+        directory = self._path(HISTORY_DIRECTORY)
+        if not directory.is_dir():
+            return []
+        dates: list[str] = []
+        for path in directory.iterdir():
+            match = HISTORY_FILENAME.fullmatch(path.name)
+            if not match or not path.is_file():
+                continue
+            try:
+                date = self._validate_date(match.group("date"))
+            except AgentError:
+                continue
+            dates.append(date)
+        return sorted(dates, reverse=True)
+
+    def read_history(self, date: str | None = None) -> list[Message]:
+        available_dates = self.list_history() if date is None else []
+        selected_date = available_dates[0] if available_dates else date
+        if selected_date is None:
+            return []
+        selected_date = self._validate_date(selected_date)
+        path = self._history_path(selected_date)
+        if not path.exists():
+            return []
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
             history: list[Message] = []
@@ -111,9 +168,16 @@ class Workspace:
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
             raise AgentError(f"Cannot read history {path}: {e}", path=str(path)) from e
 
-    def update_history(self, messages: Sequence[Message]) -> None:
-        path = self._path("history.jsonl")
+    def update_history(self, messages: Sequence[Message], date: str | None = None) -> None:
+        selected_date = self._validate_date(date) if date is not None else self._today()
+        path = self._history_path(selected_date)
         try:
+            if not messages:
+                path.unlink(missing_ok=True)
+                if path.parent.is_dir() and not any(path.parent.iterdir()):
+                    path.parent.rmdir()
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 "".join(json.dumps(message) + "\n" for message in messages),
                 encoding="utf-8",
@@ -122,12 +186,26 @@ class Workspace:
             raise AgentError(f"Cannot write history {path}: {e}", path=str(path)) from e
 
     def append_history(self, message: Message) -> None:
-        path = self._path("history.jsonl")
+        path = self._history_path(self._today())
         try:
+            path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(message) + "\n")
         except (OSError, TypeError, ValueError) as e:
             raise AgentError(f"Cannot append history {path}: {e}", path=str(path)) from e
 
     def reset_history(self) -> None:
-        self.update_history([])
+        directory = self._path(HISTORY_DIRECTORY)
+        for date in self.list_history():
+            path = self._history_path(date)
+            try:
+                path.unlink()
+            except OSError as e:
+                raise AgentError(f"Cannot reset history {path}: {e}", path=str(path)) from e
+        try:
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+        except OSError as e:
+            raise AgentError(
+                f"Cannot reset history directory {directory}: {e}", path=str(directory)
+            ) from e

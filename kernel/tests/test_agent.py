@@ -94,11 +94,11 @@ class AgentTurnTests(unittest.IsolatedAsyncioTestCase):
                         make_config(), workspace, "hi"
                     )
                 ]
+            history_files = sorted(Path(directory, "history").glob("*.jsonl"))
+            self.assertEqual(len(history_files), 1)
             history_roles = [
                 json.loads(line)["role"]
-                for line in Path(directory, "history.jsonl")
-                .read_text(encoding="utf-8")
-                .splitlines()
+                for line in history_files[0].read_text(encoding="utf-8").splitlines()
             ]
 
         self.assertEqual(
