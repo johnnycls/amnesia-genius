@@ -2,10 +2,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+
+from amnesia_agent_kernel import AgentError
 
 from amnesia_agent_cli.config import ConfigStore
-from amnesia_agent_kernel import AgentError
 
 
 class ConfigTests(unittest.TestCase):
@@ -45,12 +45,11 @@ class ConfigTests(unittest.TestCase):
                     "aws_region_name": "us-east-1",
                 },
             )
-            with patch(
-                "amnesia_agent_cli.config.validate_runtime_config"
-            ) as validate:
-                config = ConfigStore(directory).load()
-            validate.assert_called_once_with(config)
+            config = ConfigStore(directory).load()
             self.assertEqual(config.model, "bedrock/us.anthropic.claude-sonnet-4-5")
+            self.assertEqual(
+                config.provider_params["aws_access_key_id"], "AKIA"
+            )
 
 
 if __name__ == "__main__":

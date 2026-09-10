@@ -8,10 +8,11 @@ import sys
 from collections.abc import Callable
 from typing import TypeVar
 
-from amnesia_agent_kernel import Agent, AgentError
+from amnesia_agent_kernel import Agent, AgentError, ConfigError
 
 from amnesia_agent_cli import display
 from amnesia_agent_cli.config import ConfigStore
+from amnesia_agent_cli.reporting import report_error
 
 try:
     import readline  # noqa: F401 - enables up-arrow input history on POSIX
@@ -25,30 +26,38 @@ def _open_in_editor(path: str) -> None:
     """Open the given file with the platform's default opener."""
     try:
         if sys.platform == "win32":
-            subprocess.run(["notepad.exe", path], check=False, shell=False)
+            completed = subprocess.run(["notepad.exe", path], check=False, shell=False)
         elif sys.platform == "darwin":
-            subprocess.run(["open", "-t", "-W", path], check=False, shell=False)
+            completed = subprocess.run(["open", "-t", "-W", path], check=False, shell=False)
         else:
-            subprocess.run(["xdg-open", path], check=False, shell=False)
+            completed = subprocess.run(["xdg-open", path], check=False, shell=False)
     except OSError as e:
-        print(f"Cannot open {path}: {e}. Edit it manually and re-run.")
+        report_error(RuntimeError(f"Cannot open {path}: {e}. Edit it manually and re-run."))
+        return
+    if completed.returncode != 0:
+        report_error(
+            RuntimeError(
+                f"Cannot open {path}: editor opener exited with status "
+                f"{completed.returncode}. Edit it manually and re-run."
+            )
+        )
 
 
 def _load_or_edit(loader: Callable[[], T]) -> T:
     """Run a loader, or open its erroring file in an editor and exit."""
     try:
         return loader()
-    except AgentError as e:
+    except ConfigError as e:
         if e.path is None:
             raise
+        report_error(e, context=f"configuration file {e.path}")
         print(
-            f"Error: {e}\n"
             f"Opening {e.path} to fix.\n"
             "Re-run amnesia-agent after saving.",
             file=sys.stderr,
         )
         _open_in_editor(e.path)
-        sys.exit(1)
+        raise SystemExit(1) from e
 
 
 async def _render_turn(
@@ -61,8 +70,12 @@ async def _render_turn(
 
 def _run() -> None:
     """Seed frontend and kernel state, then run the interactive loop."""
-    config_store = ConfigStore()
-    config_store.setup()
+    try:
+        config_store = ConfigStore()
+        config_store.setup()
+    except AgentError as e:
+        report_error(e)
+        raise
     renderer = display.TerminalRenderer()
     display.clear()
     while True:
@@ -71,16 +84,25 @@ def _run() -> None:
             user_input: str = input("> ")
         except KeyboardInterrupt:
             print()
-            continue
-        agent = Agent(config)
+            return
+        try:
+            agent = Agent(config)
+        except AgentError as e:
+            report_error(e, f"while initializing from {config_store.path}")
+            raise
         try:
             asyncio.run(_render_turn(agent, user_input, renderer))
         except KeyboardInterrupt:
             renderer.reset()
             print()
-        except Exception as e:
+            return
+        except AgentError as e:
             renderer.reset()
-            print(f"Error: {e}", file=sys.stderr)
+            report_error(e)
+            raise
+        except Exception:
+            renderer.reset()
+            raise
 
 
 def _version() -> str:
@@ -105,11 +127,10 @@ def main() -> None:
     except (KeyboardInterrupt, EOFError):
         print()
     except AgentError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise SystemExit(1) from e
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        report_error(e, context="fatal CLI failure", include_traceback=True)
+        raise SystemExit(1) from e
 
 
 if __name__ == "__main__":

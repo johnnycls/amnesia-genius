@@ -3,7 +3,7 @@
 import os
 from collections.abc import AsyncIterator, Sequence
 
-from amnesia_agent_kernel.agent import agent_turn
+from amnesia_agent_kernel.agent import agent_turn, validate_runtime_config, validate_runtime_values
 from amnesia_agent_kernel.events import Event
 from amnesia_agent_kernel.history import Message
 from amnesia_agent_kernel.types import RuntimeConfig
@@ -18,6 +18,8 @@ class Agent:
         config: RuntimeConfig,
         workspace_root: str | os.PathLike[str] | None = None,
     ) -> None:
+        validate_runtime_values(config)
+        validate_runtime_config(config)
         self.config = config
         self._workspace = Workspace(workspace_root)
 

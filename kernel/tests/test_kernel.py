@@ -11,7 +11,7 @@ class KernelTests(unittest.TestCase):
             model="openai/test",
             api_key=None,
             base_url=None,
-            provider_params=None,
+            provider_params={"test": True},
             max_context_message_chars=1000,
         )
 

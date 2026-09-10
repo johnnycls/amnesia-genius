@@ -82,5 +82,10 @@ but ignored. New workspaces do not seed that legacy file.
 
 ## Boundary
 
-The kernel accepts a validated `RuntimeConfig` from a frontend. It has no dependency
-on `amnesia_agent_cli` and no knowledge of the frontend configuration path.
+The kernel accepts a `RuntimeConfig` from a frontend and validates it again during
+`Agent(config)` initialization, including LiteLLM provider preflight. It has no
+dependency on `amnesia_agent_cli` and no knowledge of the frontend configuration path.
+
+Expected failures use `AgentError` subclasses: `ConfigError`, `WorkspaceError`,
+`ProviderError`, and `ToolError`. Provider and workspace failures propagate to the
+caller; ordinary shell failures are returned to the model as tool-result text.

@@ -4,13 +4,16 @@ import json
 import os
 import re
 import shutil
+import stat
+import tempfile
+import threading
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from amnesia_agent_kernel.errors import AgentError
+from amnesia_agent_kernel.errors import WorkspaceError
 from amnesia_agent_kernel.history import Message
 
 DEFAULT_WORKSPACE = Path.home() / ".amnesia-agent"
@@ -27,19 +30,27 @@ def _packaged_data(name: str) -> Any:
 
 
 class Workspace:
-    """Persistent kernel state, excluding frontend-owned configuration.
-
-    Construction creates the workspace and seeds missing kernel-owned files.
-    The workspace never reads or writes frontend configuration.
-    """
+    """Persistent kernel state, excluding frontend-owned configuration."""
 
     def __init__(
         self,
         root: str | os.PathLike[str] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self.root: Path = Path(root).expanduser().absolute() if root else DEFAULT_WORKSPACE
+        if root is not None and (
+            isinstance(root, bool) or not isinstance(root, (str, os.PathLike))
+        ):
+            raise WorkspaceError(f"Invalid workspace root {root!r}")
+        if root == "":
+            raise WorkspaceError("Workspace root must not be empty")
+        try:
+            self.root: Path = (
+                Path(root).expanduser().absolute() if root is not None else DEFAULT_WORKSPACE
+            )
+        except (OSError, TypeError, ValueError) as e:
+            raise WorkspaceError(f"Invalid workspace root {root!r}: {e}") from e
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._history_lock = threading.RLock()
         self.setup()
 
     def _path(self, filename: str) -> Path:
@@ -50,14 +61,14 @@ class Workspace:
         try:
             return path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError) as e:
-            raise AgentError(f"Cannot read file {path}: {e}", path=str(path)) from e
+            raise WorkspaceError(f"Cannot read file {path}: {e}", path=str(path)) from e
 
     def _write_text(self, filename: str, content: str) -> None:
         path = self._path(filename)
         try:
             path.write_text(content, encoding="utf-8")
-        except (OSError, UnicodeError) as e:
-            raise AgentError(f"Cannot write file {path}: {e}", path=str(path)) from e
+        except (OSError, UnicodeError, TypeError) as e:
+            raise WorkspaceError(f"Cannot write file {path}: {e}", path=str(path)) from e
 
     def setup(self) -> None:
         """Create the workspace and seed missing kernel-owned files."""
@@ -67,23 +78,35 @@ class Workspace:
                 path = self._path(filename)
                 if not path.exists():
                     shutil.copyfile(str(_packaged_data(filename)), path)
-        except OSError as e:
-            raise AgentError(
+        except (ModuleNotFoundError, OSError, TypeError, ValueError) as e:
+            raise WorkspaceError(
                 f"Cannot initialize workspace {self.root}: {e}", path=str(self.root)
             ) from e
 
     def reset(self) -> None:
-        """Restore prompt and memory defaults and clear conversation history."""
-        self._reset_from_package("system_prompt.md")
-        self._reset_from_package("memory.md")
-        self.update_history([])
+        """Restore defaults and attempt every reset operation before reporting failures."""
+        failures: list[WorkspaceError] = []
+        for operation in (
+            self.reset_system_prompt,
+            self.reset_memory,
+            self.reset_history,
+        ):
+            try:
+                operation()
+            except WorkspaceError as e:
+                failures.append(e)
+        if failures:
+            details = "; ".join(str(error) for error in failures)
+            raise WorkspaceError(
+                f"Workspace reset incomplete: {details}", path=str(self.root)
+            ) from failures[0]
 
     def _reset_from_package(self, filename: str) -> None:
         path = self._path(filename)
         try:
             shutil.copyfile(str(_packaged_data(filename)), path)
-        except OSError as e:
-            raise AgentError(f"Cannot reset file {path}: {e}", path=str(path)) from e
+        except (ModuleNotFoundError, OSError, TypeError, ValueError) as e:
+            raise WorkspaceError(f"Cannot reset file {path}: {e}", path=str(path)) from e
 
     def read_system_prompt(self) -> str:
         return self._read_text("system_prompt.md")
@@ -104,25 +127,29 @@ class Workspace:
         self._reset_from_package("memory.md")
 
     def _today(self) -> str:
-        now = self._clock()
-        if now.tzinfo is None:
-            current = now
-        else:
-            current = now.astimezone(timezone.utc)
-        return current.date().isoformat()
+        try:
+            now = self._clock()
+            if not isinstance(now, datetime):
+                raise TypeError("clock must return datetime")
+            current = now if now.tzinfo is None else now.astimezone(timezone.utc)
+            return current.date().isoformat()
+        except WorkspaceError:
+            raise
+        except Exception as e:
+            raise WorkspaceError(f"Cannot determine current UTC date: {e}") from e
 
     @staticmethod
     def _validate_date(value: str) -> str:
         if not isinstance(value, str):
-            raise AgentError("History date must be an ISO date in YYYY-MM-DD format")
+            raise WorkspaceError("History date must be an ISO date in YYYY-MM-DD format")
         try:
             parsed = datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError as e:
-            raise AgentError(
+            raise WorkspaceError(
                 f"Invalid history date {value!r}; expected YYYY-MM-DD"
             ) from e
         if parsed.isoformat() != value:
-            raise AgentError(f"Invalid history date {value!r}; expected YYYY-MM-DD")
+            raise WorkspaceError(f"Invalid history date {value!r}; expected YYYY-MM-DD")
         return value
 
     def _history_path(self, date: str) -> Path:
@@ -131,19 +158,41 @@ class Workspace:
     def list_history(self) -> list[str]:
         """Return available daily history dates, newest first."""
         directory = self._path(HISTORY_DIRECTORY)
-        if not directory.is_dir():
-            return []
         dates: list[str] = []
-        for path in directory.iterdir():
-            match = HISTORY_FILENAME.fullmatch(path.name)
-            if not match or not path.is_file():
-                continue
+        try:
             try:
-                date = self._validate_date(match.group("date"))
-            except AgentError:
-                continue
-            dates.append(date)
+                directory_mode = directory.stat().st_mode
+            except FileNotFoundError:
+                return []
+            if not stat.S_ISDIR(directory_mode):
+                return []
+            for path in directory.iterdir():
+                match = HISTORY_FILENAME.fullmatch(path.name)
+                if not match or not stat.S_ISREG(path.stat().st_mode):
+                    continue
+                try:
+                    date = self._validate_date(match.group("date"))
+                except WorkspaceError:
+                    continue
+                dates.append(date)
+        except OSError as e:
+            raise WorkspaceError(
+                f"Cannot enumerate history directory {directory}: {e}",
+                path=str(directory),
+            ) from e
         return sorted(dates, reverse=True)
+
+    @staticmethod
+    def _validate_history_record(value: Any, number: int) -> Message:
+        if not isinstance(value, dict):
+            raise ValueError(f"line {number} is not a JSON object")
+        if "role" not in value and "kind" not in value:
+            raise ValueError(f"line {number} is not a message or history event")
+        if "role" in value and not isinstance(value["role"], str):
+            raise ValueError(f"line {number} has an invalid role")
+        if "kind" in value and not isinstance(value["kind"], str):
+            raise ValueError(f"line {number} has an invalid event kind")
+        return value
 
     def read_history(self, date: str | None = None) -> list[Message]:
         available_dates = self.list_history() if date is None else []
@@ -152,60 +201,124 @@ class Workspace:
             return []
         selected_date = self._validate_date(selected_date)
         path = self._history_path(selected_date)
-        if not path.exists():
-            return []
         try:
+            try:
+                mode = path.stat().st_mode
+            except FileNotFoundError:
+                return []
+            if not stat.S_ISREG(mode):
+                raise IsADirectoryError(path)
             lines = path.read_text(encoding="utf-8").splitlines()
             history: list[Message] = []
             for number, line in enumerate(lines, start=1):
                 if not line.strip():
                     continue
-                value: Any = json.loads(line)
-                if not isinstance(value, dict):
-                    raise ValueError(f"line {number} is not a JSON object")
-                history.append(value)
+                history.append(self._validate_history_record(json.loads(line), number))
             return history
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
-            raise AgentError(f"Cannot read history {path}: {e}", path=str(path)) from e
+            raise WorkspaceError(f"Cannot read history {path}: {e}", path=str(path)) from e
+
+    @staticmethod
+    def _serialize_history(messages: Sequence[Message]) -> str:
+        try:
+            validated = [
+                Workspace._validate_history_record(message, number)
+                for number, message in enumerate(messages, start=1)
+            ]
+            return "".join(json.dumps(message, allow_nan=False) + "\n" for message in validated)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise WorkspaceError(f"Cannot serialize history: {e}") from e
 
     def update_history(self, messages: Sequence[Message], date: str | None = None) -> None:
         selected_date = self._validate_date(date) if date is not None else self._today()
         path = self._history_path(selected_date)
+        with self._history_lock:
+            try:
+                if not messages:
+                    path.unlink(missing_ok=True)
+                    if path.parent.is_dir() and not any(path.parent.iterdir()):
+                        path.parent.rmdir()
+                    return
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = self._serialize_history(messages)
+                self._atomic_replace(path, content)
+            except WorkspaceError as e:
+                if e.path is None:
+                    raise WorkspaceError(str(e), path=str(path)) from e
+                raise
+            except (OSError, TypeError, ValueError, OverflowError) as e:
+                raise WorkspaceError(f"Cannot write history {path}: {e}", path=str(path)) from e
+
+    @staticmethod
+    def _atomic_replace(path: Path, content: str) -> None:
+        temporary: str | None = None
         try:
-            if not messages:
-                path.unlink(missing_ok=True)
-                if path.parent.is_dir() and not any(path.parent.iterdir()):
-                    path.parent.rmdir()
-                return
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                "".join(json.dumps(message) + "\n" for message in messages),
-                encoding="utf-8",
-            )
-        except (OSError, TypeError, ValueError) as e:
-            raise AgentError(f"Cannot write history {path}: {e}", path=str(path)) from e
+            fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            temporary = None
+        except OSError:
+            raise
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
     def append_history(self, message: Message) -> None:
         path = self._history_path(self._today())
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(message) + "\n")
-        except (OSError, TypeError, ValueError) as e:
-            raise AgentError(f"Cannot append history {path}: {e}", path=str(path)) from e
+            content = self._serialize_history([message])
+        except WorkspaceError as e:
+            raise WorkspaceError(str(e), path=str(path)) from e
+        with self._history_lock:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as stream:
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            except (OSError, TypeError, ValueError, OverflowError) as e:
+                raise WorkspaceError(f"Cannot append history {path}: {e}", path=str(path)) from e
 
     def reset_history(self) -> None:
         directory = self._path(HISTORY_DIRECTORY)
-        for date in self.list_history():
-            path = self._history_path(date)
+        failures: list[WorkspaceError] = []
+        with self._history_lock:
             try:
-                path.unlink()
+                dates = self.list_history()
+            except WorkspaceError:
+                raise
+            for date in dates:
+                path = self._history_path(date)
+                try:
+                    path.unlink()
+                except OSError as e:
+                    failures.append(
+                        WorkspaceError(f"Cannot reset history {path}: {e}", path=str(path))
+                    )
+            try:
+                try:
+                    directory_mode = directory.stat().st_mode
+                except FileNotFoundError:
+                    directory_mode = None
+                if directory_mode is not None and stat.S_ISDIR(directory_mode) and not any(
+                    directory.iterdir()
+                ):
+                    directory.rmdir()
             except OSError as e:
-                raise AgentError(f"Cannot reset history {path}: {e}", path=str(path)) from e
-        try:
-            if directory.is_dir() and not any(directory.iterdir()):
-                directory.rmdir()
-        except OSError as e:
-            raise AgentError(
-                f"Cannot reset history directory {directory}: {e}", path=str(directory)
-            ) from e
+                failures.append(
+                    WorkspaceError(
+                        f"Cannot reset history directory {directory}: {e}",
+                        path=str(directory),
+                    )
+                )
+        if failures:
+            details = "; ".join(str(error) for error in failures)
+            raise WorkspaceError(
+                f"History reset incomplete: {details}", path=str(directory)
+            ) from failures[0]

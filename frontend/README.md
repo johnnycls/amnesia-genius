@@ -18,9 +18,9 @@ amnesia-agent
 ~/.amnesia-agent-cli/config.json
 ```
 
-It is separate from the kernel workspace. The store seeds missing configuration,
-validates JSON and typed values, performs the kernel’s LiteLLM preflight check, and
-returns a `RuntimeConfig` object:
+It is separate from the kernel workspace. The store seeds missing configuration, validates the JSON schema and typed values,
+and returns a `RuntimeConfig` object. The kernel performs LiteLLM preflight during
+`Agent(config)` initialization:
 
 ```python
 from amnesia_agent_cli.config import ConfigStore
@@ -37,9 +37,10 @@ blank/default configuration.
 ## CLI behavior
 
 The CLI creates one `ConfigStore`. Before every user turn it reloads the
-configuration and constructs a fresh kernel `Agent` from that snapshot. The agent
-creates the default kernel workspace internally. The CLI renders kernel events as
-terminal output.
+configuration and constructs a fresh kernel `Agent` from that snapshot. Agent
+initialization performs provider preflight; typed initialization or turn failures
+are logged and terminate the process. The agent creates the default kernel
+workspace internally. The CLI renders kernel events as terminal output.
 
 ```text
 amnesia-agent

@@ -3,12 +3,13 @@ import sys
 import unittest
 from unittest.mock import patch
 
+from amnesia_agent_kernel.errors import AgentError, ConfigError
+
 from amnesia_agent_cli import cli
-from amnesia_agent_kernel.errors import AgentError
 
 
 def _raise_with_path() -> None:
-    raise AgentError("bad config", path="config.json")
+    raise ConfigError("bad config", path="config.json")
 
 
 def _raise_without_path() -> None:

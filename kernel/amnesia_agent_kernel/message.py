@@ -2,12 +2,17 @@
 
 from typing import Any
 
+from amnesia_agent_kernel.errors import ConfigError, ProviderError
 from amnesia_agent_kernel.history import Message
 from amnesia_agent_kernel.workspace import Workspace
 
 
 def truncate_middle(text: str, max_chars: int) -> str:
     """Keep both ends of text within the limit, joined by a middle separator."""
+    if not isinstance(text, str):
+        raise ProviderError("Message content must be text")
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
+        raise ConfigError("max_context_message_chars must be a positive integer")
     if len(text) <= max_chars:
         return text
     separator = "\n...\n"
@@ -26,6 +31,18 @@ def build_messages(
     workspace: Workspace,
 ) -> list[Message]:
     """Assemble system, user, and same-turn messages."""
+    if not isinstance(system_prompt, str) or not isinstance(user_input, str):
+        raise ProviderError("Prompt and user input must be text")
+    if not isinstance(turn_messages, list) or not all(
+        isinstance(message, dict) for message in turn_messages
+    ):
+        raise ProviderError("Turn messages were malformed")
+    if (
+        isinstance(max_context_message_chars, bool)
+        or not isinstance(max_context_message_chars, int)
+        or max_context_message_chars <= 0
+    ):
+        raise ConfigError("max_context_message_chars must be a positive integer")
     messages: list[Message] = [
         {
             "role": "system",
