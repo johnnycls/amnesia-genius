@@ -26,6 +26,7 @@ An agent doesn't need dozens of bespoke tools; it needs **one tool that can do e
 - **`amnesia-agent-cli`** — the minimal terminal CLI demo and CLI-owned configuration store.
 - **`amnesia-agent-local-server`** — a reusable loopback FastAPI server for desktop frontends.
 - **`renpy`** — a Ren'Py client project that launches the local server and streams agent events.
+- **`electron`** — a responsive Electron + React + TypeScript desktop client with Tailwind CSS, multilingual icon-first UI, and a packaged FastAPI sidecar fallback.
 
 ## Safety
 
