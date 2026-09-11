@@ -42,7 +42,7 @@ npm run build
 
 ## Cross-platform GitHub Actions
 
-GitHub Actions can build all three native artifacts by using a matrix. Each runner installs the local Python packages, builds the sidecar on that runner, then builds the Electron package for the same platform. A workflow can be placed at the repository root later without changing the app contract:
+The repository's `.github/workflows/ci.yml` builds all three native artifacts by using a matrix. Each runner installs the local Python packages, builds the sidecar on that runner, then builds the Electron package for the same platform. The relevant job follows this pattern:
 
 ```yaml
 name: desktop-build

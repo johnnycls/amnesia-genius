@@ -3,10 +3,13 @@
 Run from the electron directory after installing the local packages and PyInstaller:
     pip install ../kernel ../local_server pyinstaller
     python scripts/build-sidecar.py
+
+Use --output-dir to place the executable in another frontend's resources.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
@@ -16,14 +19,24 @@ from pathlib import Path
 
 ELECTRON_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = ELECTRON_DIR.parent
-OUTPUT_DIR = ELECTRON_DIR / "resources" / "server"
+DEFAULT_OUTPUT_DIR = ELECTRON_DIR / "resources" / "server"
 BUILD_DIR = ELECTRON_DIR / ".sidecar-build"
 ENTRYPOINT = ELECTRON_DIR / ".sidecar-entry.py"
 
 
 def main() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    for path in OUTPUT_DIR.iterdir():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="directory in which to write the native server executable",
+    )
+    args = parser.parse_args()
+    output_dir = args.output_dir.resolve()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for path in output_dir.iterdir():
         if path.name != ".gitkeep":
             shutil.rmtree(path) if path.is_dir() else path.unlink()
 
@@ -43,7 +56,7 @@ def main() -> None:
         "--name",
         "amnesia-agent-local-server",
         "--distpath",
-        str(OUTPUT_DIR),
+        str(output_dir),
         "--workpath",
         str(BUILD_DIR / "work"),
         "--specpath",
@@ -54,6 +67,12 @@ def main() -> None:
         str(REPO_DIR / "local_server"),
         "--add-data",
         f"{data_source}{separator}amnesia_agent_local_server/data",
+        "--collect-data",
+        "litellm",
+        "--collect-data",
+        "tiktoken",
+        "--collect-submodules",
+        "tiktoken_ext",
         str(ENTRYPOINT),
     ]
     try:

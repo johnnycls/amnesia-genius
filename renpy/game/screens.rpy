@@ -1,7 +1,3 @@
-transform fill_screen:
-    xfill True
-    yfill True
-
 style default:
     font "fonts/NotoSansCJKsc-Regular.otf"
 

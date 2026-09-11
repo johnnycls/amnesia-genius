@@ -21,6 +21,9 @@ ENV/
 .coverage
 htmlcov/
 
+# Generated Ren'Py sidecar
+renpy/game/server/
+
 # Editors / OS
 .idea/
 .vscode/

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -25,6 +26,19 @@ except ImportError:  # Allows the parser/client helpers to be tested outside Ren
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+BUNDLED_SERVER_NAME = "amnesia-agent-local-server.exe" if sys.platform == "win32" else "amnesia-agent-local-server"
+
+
+def bundled_server_path() -> str | None:
+    """Return the packaged server path when running inside a Ren'Py game."""
+    if renpy is None:
+        return None
+    config = getattr(renpy, "config", None)
+    gamedir = getattr(config, "gamedir", None)
+    if gamedir is None:
+        return None
+    candidate = os.path.join(os.fspath(gamedir), "server", BUNDLED_SERVER_NAME)
+    return candidate if os.path.isfile(candidate) else None
 
 
 class LocalServerError(RuntimeError):
@@ -85,10 +99,8 @@ class LocalServerClient:
         if self.process is not None and self.process.poll() is None:
             return
         self.instance_id = uuid.uuid4().hex
-        command = [
-            self.python_command,
-            "-m",
-            "amnesia_agent_local_server",
+        bundled_server = bundled_server_path()
+        server_args = [
             "--host",
             self.host,
             "--port",
@@ -96,6 +108,11 @@ class LocalServerClient:
             "--instance-id",
             self.instance_id,
         ]
+        command = (
+            [bundled_server, *server_args]
+            if bundled_server
+            else [self.python_command, "-m", "amnesia_agent_local_server", *server_args]
+        )
         try:
             self.process = subprocess.Popen(
                 command,
