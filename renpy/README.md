@@ -6,6 +6,24 @@ The project starts `amnesia-agent-local-server` as a child process and talks to 
 `127.0.0.1:8765`. The Ren'Py side deliberately uses only Python's standard-library HTTP and
 SSE client; it does not import LiteLLM, FastAPI, or the kernel.
 
+## Architecture
+
+```text
+Ren'Py game
+  └─ AgentController      (game/agent_controller.py)
+       └─ LocalServerClient  (game/local_server_client.py)
+            └─ HTTP / SSE  →  amnesia-agent-local-server  →  amnesia-agent-kernel
+```
+
+- **`AgentController`** — Ren'Py-facing state controller. Manages chat messages,
+  streaming text, workspace reads, and settings. All I/O runs on background
+  threads; callbacks dispatch to the Ren'Py main thread via
+  `renpy.invoke_in_main_thread()`.
+- **`LocalServerClient`** — standard-library HTTP client (`urllib.request`). Starts
+  the server child process, polls `/v1/health` with a 15-second timeout, streams
+  turns via SSE, and verifies the server's `instance_id` on startup to detect port
+  conflicts.
+
 ## Development setup
 
 Install the server into the Python interpreter that should run beside Ren'Py:
@@ -25,7 +43,7 @@ AMNESIA_AGENT_PYTHON=/path/to/python
 On Windows, configure the equivalent environment variable in the shell that starts Ren'Py.
 
 The local server owns configuration at `~/.amnesia-agent-local-server/config.json`; its kernel
-workspace remains at `~/.amnesia-agent`. The Ren'Py project currently provides functional default
+workspace remains at `~/.amnesia-agent/`. The Ren'Py project currently provides functional default
 screens for chat, settings, system prompt, memory, and history.
 
 ## Languages and fonts
@@ -52,3 +70,19 @@ available for local development.
 
 The server is intentionally loopback-only and executes the kernel's unrestricted bash tool, so
 both the packaged game and the development setup should only be run on a trusted desktop.
+
+## Troubleshooting
+
+**Server won't start** — Ensure `amnesia-agent-local-server` is installed in the Python
+interpreter Ren'Py uses. Set `AMNESIA_AGENT_PYTHON` to point to the correct executable.
+
+**Port conflict** — The server binds to `127.0.0.1:8765` by default. If another process is
+using that port, stop it or change the server's `--port` flag (requires editing the
+`LocalServerClient` startup arguments).
+
+**Missing characters (boxes)** — The bundled CJK font covers all five interface languages. If
+you replaced it, ensure the replacement has coverage for every enabled language.
+
+**Health check timeout** — The client polls `/v1/health` for up to 15 seconds. If the server
+takes longer to start (e.g. first-run pip installs), increase the timeout or pre-install
+dependencies.

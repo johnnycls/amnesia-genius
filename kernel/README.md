@@ -2,6 +2,8 @@
 
 The frontend-agnostic kernel for the amnesia agent.
 
+**Python >=3.10**
+
 ## Install
 
 ```text
@@ -109,13 +111,42 @@ history file; malformed inputs raise `WorkspaceError` without deleting it.
 The bash tool schema is a kernel constant. It is not copied to the workspace and
 cannot be changed through workspace files.
 
+### Packaged data
+
+The kernel ships two seed files that initialize the workspace on first use:
+
+- `data/system_prompt.md` — the default system prompt (covers agent identity,
+  platform detection, tool usage, memory management, and context budget).
+- `data/memory.md` — a blank starter memory file.
+
+These are copied into `~/.amnesia-agent/` when the workspace is first created.
+
+## Error classes
+
+The kernel uses typed `AgentError` subclasses for expected failures:
+
+| Class | Cause |
+|---|---|
+| `ConfigError` | Invalid or missing provider/execution configuration |
+| `WorkspaceError` | Filesystem or validation errors in the workspace |
+| `ProviderError` | LiteLLM or upstream provider failures |
+| `ToolError` | Bash execution failures (timeout, output overflow) |
+
+Provider and workspace failures propagate to the caller; ordinary shell failures
+and bounded execution failures are returned to the model as tool-result text.
+
+## Cross-platform notes
+
+The bash tool handles process management differently per platform:
+
+- **Unix** — commands run in a new session (`start_new_session=True`). Timeout
+  kills the process group with `SIGKILL`.
+- **Windows** — commands run in a new process group
+  (`CREATE_NEW_PROCESS_GROUP`). Timeout kills the tree with
+  `taskkill /T /F`.
+
 ## Boundary
 
 The kernel accepts a `ProviderConfig` and `ExecutionPolicy` from a frontend and
 validates them during `KernelSession` initialization, including LiteLLM provider
 preflight. It has no dependency on frontend configuration paths.
-
-Expected failures use `AgentError` subclasses: `ConfigError`, `WorkspaceError`,
-`ProviderError` and `ToolError`. Provider and workspace failures
-propagate to the caller; ordinary shell failures and bounded execution failures
-are returned to the model as tool-result text.

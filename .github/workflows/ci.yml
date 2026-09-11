@@ -319,6 +319,21 @@ jobs:
         with:
           name: amnesia-agent-renpy-linux
           path: release-assets/renpy-linux
+      - name: Package release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/release-assets"
+          zip -qr python-kernel-dist.zip kernel
+          zip -qr python-cli-dist.zip cli
+          zip -qr python-local-server-dist.zip local-server
+          zip -qr amnesia-agent-electron-windows.zip electron-windows
+          zip -qr amnesia-agent-electron-macos.zip electron-macos
+          zip -qr amnesia-agent-electron-linux.zip electron-linux
+          zip -qr amnesia-agent-renpy-windows.zip renpy-windows
+          zip -qr amnesia-agent-renpy-macos.zip renpy-macos
+          zip -qr amnesia-agent-renpy-linux.zip renpy-linux
+          ls -l
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -328,12 +343,12 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            release-assets/kernel/*
-            release-assets/cli/*
-            release-assets/local-server/*
-            release-assets/electron-windows/*
-            release-assets/electron-macos/*
-            release-assets/electron-linux/*
-            release-assets/renpy-windows/*
-            release-assets/renpy-macos/*
-            release-assets/renpy-linux/*
+            release-assets/python-kernel-dist.zip
+            release-assets/python-cli-dist.zip
+            release-assets/python-local-server-dist.zip
+            release-assets/amnesia-agent-electron-windows.zip
+            release-assets/amnesia-agent-electron-macos.zip
+            release-assets/amnesia-agent-electron-linux.zip
+            release-assets/amnesia-agent-renpy-windows.zip
+            release-assets/amnesia-agent-renpy-macos.zip
+            release-assets/amnesia-agent-renpy-linux.zip
