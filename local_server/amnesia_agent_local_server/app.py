@@ -21,7 +21,7 @@ def create_app(
     instance_id: str | None = None,
 ) -> FastAPI:
     """Create an application with a fresh server service."""
-    app = FastAPI(title="Amnesia Agent Local Server", version="0.1.0")
+    app = FastAPI(title="Amnesia Agent Local Server", version="0.0.0-alpha.0")
     app.state.agent_service = AgentService(config_store, instance_id)
     app.state.uvicorn_server = None
 
