@@ -16,8 +16,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install ./kernel
@@ -43,8 +43,8 @@ jobs:
         python-version: ["3.10", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install ./kernel
@@ -61,29 +61,29 @@ jobs:
   kernel-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade build
       - run: python -m build kernel --outdir dist/kernel
       - run: python -m pip install --no-cache-dir dist/kernel/*.whl
       - run: python -c "import amnesia_agent_kernel"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: python-kernel-dist
-          path: dist/kernel/**
+          path: dist/kernel
           if-no-files-found: error
 
   cli-build:
     needs: kernel-build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: python-kernel-dist
           path: dist/kernel
@@ -92,21 +92,21 @@ jobs:
       - run: python -m build cli --outdir dist/cli
       - run: python -m pip install --no-cache-dir --find-links dist/kernel dist/cli/*.whl
       - run: python -c "import amnesia_agent_cli"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: python-cli-dist
-          path: dist/cli/**
+          path: dist/cli
           if-no-files-found: error
 
   local-server-build:
     needs: kernel-build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: python-kernel-dist
           path: dist/kernel
@@ -115,10 +115,10 @@ jobs:
       - run: python -m build local_server --outdir dist/local-server
       - run: python -m pip install --no-cache-dir --find-links dist/kernel dist/local-server/*.whl
       - run: python -c "import amnesia_agent_local_server"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: python-local-server-dist
-          path: dist/local-server/**
+          path: dist/local-server
           if-no-files-found: error
 
   electron-build:
@@ -134,11 +134,11 @@ jobs:
             artifact: linux
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
-      - uses: actions/setup-python@v5
+          node-version: "24"
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - working-directory: electron
@@ -153,10 +153,10 @@ jobs:
         run: npm run build:server
       - working-directory: electron
         run: npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: amnesia-agent-electron-${{ matrix.artifact }}
-          path: electron/release/**
+          path: electron/release
           if-no-files-found: error
 
   renpy-build:
@@ -175,8 +175,8 @@ jobs:
             package: linux
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install ./kernel ./local_server pyinstaller
@@ -200,25 +200,62 @@ jobs:
       - name: Lint Ren'Py project (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        working-directory: renpy
         run: |
-          & ".renpy-sdk\renpy-$env:RENPY_VERSION-sdk\renpy.exe" renpy lint
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sdk = Join-Path $env:GITHUB_WORKSPACE ".renpy-sdk\renpy-$env:RENPY_VERSION-sdk"
+          $lint = Start-Process -FilePath (Join-Path $sdk "renpy.exe") -ArgumentList @(
+            (Join-Path $env:GITHUB_WORKSPACE "renpy"),
+            "lint"
+          ) -Wait -PassThru
+          if ($lint.ExitCode -ne 0) { exit $lint.ExitCode }
       - name: Lint Ren'Py project (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: ./.renpy-sdk/renpy-"$RENPY_VERSION"-sdk/renpy.sh renpy lint
+        working-directory: renpy
+        run: |
+          sdk="$GITHUB_WORKSPACE/.renpy-sdk/renpy-$RENPY_VERSION-sdk"
+          "$sdk/renpy.sh" "$GITHUB_WORKSPACE/renpy" lint
       - name: Build Ren'Py distribution (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        working-directory: renpy
         run: |
-          & ".renpy-sdk\renpy-$env:RENPY_VERSION-sdk\renpy.exe" ".renpy-sdk\renpy-$env:RENPY_VERSION-sdk\launcher" distribute --destination renpy/dist --package "${{ matrix.package }}" renpy
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sdk = Join-Path $env:GITHUB_WORKSPACE ".renpy-sdk\renpy-$env:RENPY_VERSION-sdk"
+          $destination = Join-Path $env:GITHUB_WORKSPACE "renpy\dist"
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          $build = Start-Process -FilePath (Join-Path $sdk "renpy.exe") -ArgumentList @(
+            (Join-Path $sdk "launcher"),
+            "distribute",
+            "--destination",
+            $destination,
+            "--package",
+            "${{ matrix.package }}",
+            (Join-Path $env:GITHUB_WORKSPACE "renpy")
+          ) -Wait -PassThru
+          if ($build.ExitCode -ne 0) { exit $build.ExitCode }
+          $files = @(Get-ChildItem -Path $destination -File)
+          if ($files.Count -eq 0) {
+            Write-Error "Ren'Py produced no files in $destination"
+            exit 1
+          }
+          $files | Format-Table FullName, Length -AutoSize
       - name: Build Ren'Py distribution (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: ./.renpy-sdk/renpy-"$RENPY_VERSION"-sdk/renpy.sh ./.renpy-sdk/renpy-"$RENPY_VERSION"-sdk/launcher distribute --destination renpy/dist --package "${{ matrix.package }}" renpy
-      - uses: actions/upload-artifact@v4
+        working-directory: renpy
+        run: |
+          sdk="$GITHUB_WORKSPACE/.renpy-sdk/renpy-$RENPY_VERSION-sdk"
+          destination="$GITHUB_WORKSPACE/renpy/dist"
+          mkdir -p "$destination"
+          "$sdk/renpy.sh" "$sdk/launcher" distribute --destination "$destination" --package "${{ matrix.package }}" "$GITHUB_WORKSPACE/renpy"
+          files=$(find "$destination" -maxdepth 1 -type f -print)
+          if [ -z "$files" ]; then
+            echo "Ren'Py produced no files in $destination" >&2
+            exit 1
+          fi
+          printf '%s\n' "$files"
+      - uses: actions/upload-artifact@v7
         with:
           name: amnesia-agent-renpy-${{ matrix.artifact }}
-          path: renpy/dist/**
+          path: renpy/dist
           if-no-files-found: error
