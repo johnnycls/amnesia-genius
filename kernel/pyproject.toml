@@ -9,7 +9,10 @@ description = "A minimal, frontend-agnostic self-directed agent kernel."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10,<3.15"
-dependencies = ["litellm>=1.98,<2"]
+# LiteLLM 1.98+ imports typing.NotRequired during module initialization, but
+# typing.NotRequired is only available in Python 3.11+. Keep Python 3.10 support
+# on a version that uses the typing_extensions backport instead.
+dependencies = ["litellm==1.97.0"]
 
 [tool.setuptools]
 packages = ["amnesia_agent_kernel"]
