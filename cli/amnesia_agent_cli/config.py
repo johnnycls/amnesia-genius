@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from amnesia_agent_kernel import (
     ConfigError,
@@ -120,7 +120,7 @@ class ConfigStore:
             )
         raw = raw_value
         provider = ProviderConfig(
-            model=raw.get("model"),
+            model=cast(str, raw.get("model")),
             api_key=_blank_as_none(raw.get("api_key")),
             base_url=_blank_as_none(raw.get("base_url")),
             provider_params=raw.get("provider_params"),

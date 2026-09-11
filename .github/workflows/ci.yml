@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ./kernel
-      - run: pip install ./cli ruff mypy
+      - run: pip install ./cli ./local_server ruff mypy
       - working-directory: kernel
         run: ruff check .
       - working-directory: kernel
@@ -22,6 +22,10 @@ jobs:
       - working-directory: cli
         run: ruff check .
       - working-directory: cli
+        run: mypy
+      - working-directory: local_server
+        run: ruff check .
+      - working-directory: local_server
         run: mypy
 
   test:
@@ -37,8 +41,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install ./kernel
-      - run: pip install ./cli
+      - run: pip install ./cli ./local_server
       - working-directory: kernel
         run: python -m unittest discover -t . -s tests -v
       - working-directory: cli
+        run: python -m unittest discover -t . -s tests -v
+      - working-directory: local_server
+        run: python -m unittest discover -t . -s tests -v
+      - working-directory: renpy
         run: python -m unittest discover -t . -s tests -v

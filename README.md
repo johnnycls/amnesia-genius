@@ -24,6 +24,8 @@ An agent doesn't need dozens of bespoke tools; it needs **one tool that can do e
 
 - **`amnesia-agent-kernel`** — the frontend-agnostic async agent kernel.
 - **`amnesia-agent-cli`** — the minimal terminal CLI demo and CLI-owned configuration store.
+- **`amnesia-agent-local-server`** — a reusable loopback FastAPI server for desktop frontends.
+- **`renpy`** — a Ren'Py client project that launches the local server and streams agent events.
 
 ## Safety
 
@@ -36,6 +38,7 @@ model and workspace.
 ```text
 pip install ./kernel
 pip install ./cli
+pip install ./local_server
 amnesia-agent
 ```
 
@@ -55,6 +58,8 @@ The command creates two separate user-owned directories:
 
 The CLI configuration is intentionally outside the kernel workspace. It is loaded,
 validated, and passed to the kernel as in-memory `ProviderConfig` and `ExecutionPolicy` values.
+The local server has its own configuration at `~/.amnesia-agent-local-server/config.json`.
+It exposes a versioned loopback HTTP/SSE API for desktop clients such as the Ren'Py project.
 
 There is no automatic migration from the previous `~/.amnesia-genius` directory.
 Copy files manually if you want to preserve old state.
@@ -154,3 +159,6 @@ Configuration reset is handled separately by `ConfigStore.reset()`.
 - [`cli/README.md`](cli/README.md) — CLI, config, and installation details.
 - [`kernel/pyproject.toml`](kernel/pyproject.toml) — kernel distribution metadata.
 - [`cli/pyproject.toml`](cli/pyproject.toml) — CLI distribution metadata.
+- [`local_server/README.md`](local_server/README.md) — local server API and development setup.
+- [`local_server/pyproject.toml`](local_server/pyproject.toml) — local server distribution metadata.
+- [`renpy/README.md`](renpy/README.md) — Ren'Py client setup.
